@@ -1,0 +1,39 @@
+# Docker Compose for GoThinkDB
+# Single node configuration
+
+version: '3.8'
+
+services:
+  gothinkdb:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gothinkdb
+    ports:
+      - "28015:28015"  # Driver protocol
+      - "8080:8080"    # HTTP admin
+      - "29015:29015"  # Cluster communication
+    volumes:
+      - gothinkdb-data:/data/gothinkdb
+    environment:
+      - GOTHINKDB_SERVER_NAME=gothinkdb-single
+    command:
+      - "-data"
+      - "/data/gothinkdb"
+      - "-driver-address"
+      - ":28015"
+      - "-http-address"
+      - ":8080"
+      - "-cluster-address"
+      - ":29015"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  gothinkdb-data:
+    driver: local

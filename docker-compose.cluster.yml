@@ -1,0 +1,126 @@
+# Docker Compose for GoThinkDB Cluster
+# Multi-node cluster configuration for testing
+
+version: '3.8'
+
+services:
+  gothinkdb-node1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gothinkdb-node1
+    ports:
+      - "28015:28015"
+      - "8080:8080"
+      - "29015:29015"
+    volumes:
+      - gothinkdb-node1-data:/data/gothinkdb
+    environment:
+      - GOTHINKDB_SERVER_NAME=gothinkdb-node1
+    command:
+      - "-data"
+      - "/data/gothinkdb"
+      - "-driver-address"
+      - ":28015"
+      - "-http-address"
+      - ":8080"
+      - "-cluster-address"
+      - ":29015"
+      - "-server-name"
+      - "gothinkdb-node1"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - gothinkdb-cluster
+
+  gothinkdb-node2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gothinkdb-node2
+    ports:
+      - "28016:28015"
+      - "8081:8080"
+      - "29016:29015"
+    volumes:
+      - gothinkdb-node2-data:/data/gothinkdb
+    environment:
+      - GOTHINKDB_SERVER_NAME=gothinkdb-node2
+    command:
+      - "-data"
+      - "/data/gothinkdb"
+      - "-driver-address"
+      - ":28015"
+      - "-http-address"
+      - ":8080"
+      - "-cluster-address"
+      - ":29015"
+      - "-join"
+      - "gothinkdb-node1:29015"
+      - "-server-name"
+      - "gothinkdb-node2"
+    depends_on:
+      gothinkdb-node1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - gothinkdb-cluster
+
+  gothinkdb-node3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gothinkdb-node3
+    ports:
+      - "28017:28015"
+      - "8082:8080"
+      - "29017:29015"
+    volumes:
+      - gothinkdb-node3-data:/data/gothinkdb
+    environment:
+      - GOTHINKDB_SERVER_NAME=gothinkdb-node3
+    command:
+      - "-data"
+      - "/data/gothinkdb"
+      - "-driver-address"
+      - ":28015"
+      - "-http-address"
+      - ":8080"
+      - "-cluster-address"
+      - ":29015"
+      - "-join"
+      - "gothinkdb-node1:29015"
+      - "-server-name"
+      - "gothinkdb-node3"
+    depends_on:
+      gothinkdb-node1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - gothinkdb-cluster
+
+volumes:
+  gothinkdb-node1-data:
+    driver: local
+  gothinkdb-node2-data:
+    driver: local
+  gothinkdb-node3-data:
+    driver: local
+
+networks:
+  gothinkdb-cluster:
+    driver: bridge

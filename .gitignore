@@ -1,0 +1,61 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+tmp/
+
+# Test binary
+*.test
+
+# Output of go coverage tool
+coverage.out
+coverage.html
+
+# Dependency directories
+vendor/
+node_modules/
+
+# IDE specific
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Go workspace
+go.work
+go.work.sum
+
+# Environment variables
+.env
+.env.local
+
+# Build output
+dist/
+build/
+
+# Docker volumes
+data/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+
+# Dashboard build
+dashboard/.next/
+dashboard/out/
+dashboard/node_modules/
+
+# Driver builds
+drivers/js/dist/
+drivers/js/node_modules/
+drivers/rs/target/
