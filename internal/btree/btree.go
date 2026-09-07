@@ -79,106 +79,111 @@ func (t *BTree) get(ctx context.Context, nodeID storage.BlockID, key []byte) ([]
 
 // Put inserts or updates a key-value pair
 func (t *BTree) Put(ctx context.Context, key, value []byte) error {
-	newRoot, err := t.put(ctx, t.rootID, key, value)
+	newRoot, _, err := t.put(ctx, t.rootID, key, value)
 	if err != nil {
 		return err
 	}
 
 	if newRoot != storage.InvalidBlockID {
-		// The root was split, create a new root
+		// The root was split, update root ID
 		t.rootID = newRoot
 	}
 
 	return nil
 }
 
-func (t *BTree) put(ctx context.Context, nodeID storage.BlockID, key, value []byte) (storage.BlockID, error) {
+func (t *BTree) put(ctx context.Context, nodeID storage.BlockID, key, value []byte) (storage.BlockID, []byte, error) {
 	block, err := t.cache.Get(ctx, nodeID)
 	if err != nil {
-		return storage.InvalidBlockID, err
+		return storage.InvalidBlockID, nil, err
 	}
 
 	// Leaf node
 	if block[0] == byte(NodeTypeLeaf) {
 		node, err := DeserializeLeaf(nodeID, block[:])
 		if err != nil {
-			return storage.InvalidBlockID, err
+			return storage.InvalidBlockID, nil, err
 		}
 
 		if err := node.Insert(key, value); err != nil {
-			return storage.InvalidBlockID, err
+			return storage.InvalidBlockID, nil, err
 		}
 
 		// Write back
 		data := node.Serialize()
 		newBlock := storage.NewBlockFromData(data)
 		if err := t.cache.Put(ctx, nodeID, newBlock); err != nil {
-			return storage.InvalidBlockID, err
+			return storage.InvalidBlockID, nil, err
 		}
 
 		// Split if full
 		if node.IsFull() {
 			rightID, separator, err := t.splitLeaf(ctx, node)
 			if err != nil {
-				return storage.InvalidBlockID, err
+				return storage.InvalidBlockID, nil, err
 			}
 
 			// If this is the root, create a new root
 			if nodeID == t.rootID {
-				return t.createRoot(ctx, node.blockID, rightID, separator)
+				newRootID, err := t.createRoot(ctx, node.blockID, rightID, separator)
+				if err != nil {
+					return storage.InvalidBlockID, nil, err
+				}
+				return newRootID, nil, nil
 			}
 
-			return rightID, nil
+			return rightID, separator, nil
 		}
 
-		return storage.InvalidBlockID, nil
+		return storage.InvalidBlockID, nil, nil
 	}
 
 	// Internal node
 	node, err := DeserializeInternal(nodeID, block[:])
 	if err != nil {
-		return storage.InvalidBlockID, err
+		return storage.InvalidBlockID, nil, err
 	}
 
 	childIdx := node.FindChild(key)
-	newChild, err := t.put(ctx, node.children[childIdx], key, value)
+	newChild, childSeparator, err := t.put(ctx, node.children[childIdx], key, value)
 	if err != nil {
-		return storage.InvalidBlockID, err
+		return storage.InvalidBlockID, nil, err
 	}
 
 	if newChild != storage.InvalidBlockID {
-		// Child was split, insert new child
-		// For simplicity, we'll use the first byte of the key as the separator
-		// In a real implementation, we'd use the actual separator key
-		separator := key
-		if err := node.Insert(separator, newChild); err != nil {
-			return storage.InvalidBlockID, err
+		// Child was split, insert new child with the separator
+		if err := node.Insert(childSeparator, newChild); err != nil {
+			return storage.InvalidBlockID, nil, err
 		}
 
 		// Write back
 		data := node.Serialize()
 		newBlock := storage.NewBlockFromData(data)
 		if err := t.cache.Put(ctx, nodeID, newBlock); err != nil {
-			return storage.InvalidBlockID, err
+			return storage.InvalidBlockID, nil, err
 		}
 
 		// Split if full
 		if node.IsFull() {
 			rightID, separator, err := t.splitInternal(ctx, node)
 			if err != nil {
-				return storage.InvalidBlockID, err
+				return storage.InvalidBlockID, nil, err
 			}
 
 			// If this is the root, create a new root
 			if nodeID == t.rootID {
-				return t.createRoot(ctx, node.blockID, rightID, separator)
+				newRootID, err := t.createRoot(ctx, node.blockID, rightID, separator)
+				if err != nil {
+					return storage.InvalidBlockID, nil, err
+				}
+				return newRootID, nil, nil
 			}
 
-			return rightID, nil
+			return rightID, separator, nil
 		}
 	}
 
-	return storage.InvalidBlockID, nil
+	return storage.InvalidBlockID, nil, nil
 }
 
 // createRoot creates a new root node when the old root splits
