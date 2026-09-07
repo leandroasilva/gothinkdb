@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"embed"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -11,9 +13,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/leandroasilva/gothinkdb/internal/api"
 	"github.com/leandroasilva/gothinkdb/internal/config"
 	"github.com/leandroasilva/gothinkdb/internal/protocol"
+	"github.com/leandroasilva/gothinkdb/internal/reql"
+	"github.com/leandroasilva/gothinkdb/internal/rpc"
 )
+
+//go:embed all:dashboard
+var dashboardFS embed.FS
 
 func main() {
 	// Parse command line flags
@@ -66,16 +74,29 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Setup HTTP server for admin interface
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"ok","server":"%s","version":"0.1.0"}`, cfg.ServerName)
-	})
+	// Create core components
+	evaluator := reql.NewEvaluator()
+	cluster := rpc.NewClusterManager(cfg.ServerName)
 
-	// Serve dashboard
-	mux.Handle("/", http.FileServer(http.Dir("web/dashboard")))
+	// Create API server with all routes
+	apiServer := api.NewServer(evaluator, cluster)
+
+	// Setup dashboard file server from embedded FS
+	dashboardSub, err := fs.Sub(dashboardFS, "dashboard")
+	if err != nil {
+		slog.Error("failed to create dashboard sub filesystem", "error", err)
+		os.Exit(1)
+	}
+	dashboardHandler := http.FileServer(http.FS(dashboardSub))
+
+	// Create main mux that combines API + dashboard
+	mux := http.NewServeMux()
+
+	// Register all API routes via api.Server
+	mux.Handle("/api/", apiServer)
+
+	// Serve dashboard as fallback
+	mux.Handle("/", dashboardHandler)
 
 	httpServer := &http.Server{
 		Addr:         cfg.HTTPAddress,
@@ -103,6 +124,11 @@ func main() {
 	slog.Info("ReQL protocol server started successfully", "address", cfg.DriverAddress)
 
 	slog.Info("GoThinkDB server started successfully")
+	fmt.Printf("\nGoThinkDB is ready!\n")
+	fmt.Printf("  Dashboard:       http://localhost%s\n", cfg.HTTPAddress)
+	fmt.Printf("  Driver protocol: localhost%s\n", cfg.DriverAddress)
+	fmt.Printf("  Cluster:         localhost%s\n", cfg.ClusterAddress)
+	fmt.Printf("  Health check:    http://localhost%s/api/health\n\n", cfg.HTTPAddress)
 
 	// Wait for interrupt signal for graceful shutdown
 	quit := make(chan os.Signal, 1)
