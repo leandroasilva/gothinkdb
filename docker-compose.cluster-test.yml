@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  gothinkdb-node1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gothinkdb-node1
+    ports:
+      - "28015:28015"
+      - "8080:8080"
+      - "29015:29015"
+    environment:
+      - SERVER_NAME=node1
+      - DATA_DIR=/data/gothinkdb
+    volumes:
+      - node1-data:/data/gothinkdb
+    networks:
+      - gothinkdb-cluster
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  gothinkdb-node2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gothinkdb-node2
+    ports:
+      - "28016:28015"
+      - "8081:8080"
+      - "29016:29015"
+    environment:
+      - SERVER_NAME=node2
+      - DATA_DIR=/data/gothinkdb
+      - JOIN_ADDRESS=gothinkdb-node1:29015
+    volumes:
+      - node2-data:/data/gothinkdb
+    networks:
+      - gothinkdb-cluster
+    depends_on:
+      - gothinkdb-node1
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  gothinkdb-node3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gothinkdb-node3
+    ports:
+      - "28017:28015"
+      - "8082:8080"
+      - "29017:29015"
+    environment:
+      - SERVER_NAME=node3
+      - DATA_DIR=/data/gothinkdb
+      - JOIN_ADDRESS=gothinkdb-node1:29015
+    volumes:
+      - node3-data:/data/gothinkdb
+    networks:
+      - gothinkdb-cluster
+    depends_on:
+      - gothinkdb-node1
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+networks:
+  gothinkdb-cluster:
+    driver: bridge
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:
