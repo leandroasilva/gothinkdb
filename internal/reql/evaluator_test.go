@@ -378,3 +378,183 @@ func TestEvaluator_Skip(t *testing.T) {
 		t.Errorf("expected 5 documents after skip, got %d", len(skippedDocs.Array()))
 	}
 }
+
+func TestEvaluator_IndexCreate(t *testing.T) {
+	eval := NewEvaluator()
+	ctx := context.Background()
+
+	// Insert documents
+	for i := 0; i < 5; i++ {
+		insertQuery := []interface{}{
+			float64(17),
+			[]interface{}{float64(10), "users"},
+			map[string]interface{}{
+				"id":   fmt.Sprintf("user%d", i),
+				"name": fmt.Sprintf("User%d", i),
+				"age":  float64(20 + i),
+			},
+		}
+		_, err := eval.Evaluate(ctx, insertQuery)
+		if err != nil {
+			t.Fatalf("insert %d failed: %v", i, err)
+		}
+	}
+
+	// Create index on age field
+	indexCreateQuery := []interface{}{
+		float64(75),
+		[]interface{}{float64(10), "users"},
+		"age_index",
+		"age",
+	}
+	result, err := eval.Evaluate(ctx, indexCreateQuery)
+	if err != nil {
+		t.Fatalf("index_create failed: %v", err)
+	}
+
+	created, ok := result.Object().Get("created")
+	if !ok || created.Num() != 1 {
+		t.Errorf("expected created=1, got %v", created)
+	}
+}
+
+func TestEvaluator_IndexList(t *testing.T) {
+	eval := NewEvaluator()
+	ctx := context.Background()
+
+	// Create indexes
+	for i := 0; i < 3; i++ {
+		indexCreateQuery := []interface{}{
+			float64(75),
+			[]interface{}{float64(10), "test_table"},
+			fmt.Sprintf("index%d", i),
+			fmt.Sprintf("field%d", i),
+		}
+		_, err := eval.Evaluate(ctx, indexCreateQuery)
+		if err != nil {
+			t.Fatalf("index_create %d failed: %v", i, err)
+		}
+	}
+
+	// List indexes
+	indexListQuery := []interface{}{
+		float64(77),
+		[]interface{}{float64(10), "test_table"},
+	}
+	result, err := eval.Evaluate(ctx, indexListQuery)
+	if err != nil {
+		t.Fatalf("index_list failed: %v", err)
+	}
+
+	if len(result.Array()) != 3 {
+		t.Errorf("expected 3 indexes, got %d", len(result.Array()))
+	}
+}
+
+func TestEvaluator_IndexDrop(t *testing.T) {
+	eval := NewEvaluator()
+	ctx := context.Background()
+
+	// Create index
+	indexCreateQuery := []interface{}{
+		float64(75),
+		[]interface{}{float64(10), "test_table"},
+		"test_index",
+		"field",
+	}
+	_, err := eval.Evaluate(ctx, indexCreateQuery)
+	if err != nil {
+		t.Fatalf("index_create failed: %v", err)
+	}
+
+	// Drop index
+	indexDropQuery := []interface{}{
+		float64(76),
+		[]interface{}{float64(10), "test_table"},
+		"test_index",
+	}
+	result, err := eval.Evaluate(ctx, indexDropQuery)
+	if err != nil {
+		t.Fatalf("index_drop failed: %v", err)
+	}
+
+	dropped, ok := result.Object().Get("dropped")
+	if !ok || dropped.Num() != 1 {
+		t.Errorf("expected dropped=1, got %v", dropped)
+	}
+}
+
+func TestEvaluator_Between(t *testing.T) {
+	eval := NewEvaluator()
+	ctx := context.Background()
+
+	// Insert documents
+	for i := 0; i < 10; i++ {
+		insertQuery := []interface{}{
+			float64(17),
+			[]interface{}{float64(10), "users"},
+			map[string]interface{}{
+				"id":   fmt.Sprintf("user%d", i),
+				"name": fmt.Sprintf("User%d", i),
+				"age":  float64(20 + i),
+			},
+		}
+		_, err := eval.Evaluate(ctx, insertQuery)
+		if err != nil {
+			t.Fatalf("insert %d failed: %v", i, err)
+		}
+	}
+
+	// Create index on age
+	indexCreateQuery := []interface{}{
+		float64(75),
+		[]interface{}{float64(10), "users"},
+		"age_index",
+		"age",
+	}
+	_, err := eval.Evaluate(ctx, indexCreateQuery)
+	if err != nil {
+		t.Fatalf("index_create failed: %v", err)
+	}
+
+	// Query with BETWEEN (age 23-26)
+	betweenQuery := []interface{}{
+		float64(172),
+		[]interface{}{float64(10), "users"},
+		"age_index",
+		float64(23),
+		float64(26),
+	}
+	result, err := eval.Evaluate(ctx, betweenQuery)
+	if err != nil {
+		t.Fatalf("between failed: %v", err)
+	}
+
+	if len(result.Array()) != 4 {
+		t.Errorf("expected 4 documents, got %d", len(result.Array()))
+	}
+}
+
+func TestEvaluator_Changes(t *testing.T) {
+	eval := NewEvaluator()
+	ctx := context.Background()
+
+	// Create changefeed
+	changesQuery := []interface{}{
+		float64(152),
+		[]interface{}{float64(10), "test_table"},
+	}
+	result, err := eval.Evaluate(ctx, changesQuery)
+	if err != nil {
+		t.Fatalf("changes failed: %v", err)
+	}
+
+	if result.Object() == nil {
+		t.Fatal("result should be an object")
+	}
+
+	reqlType, ok := result.Object().Get("$reql_type$")
+	if !ok || reqlType.Str() != "CHANGEFEED" {
+		t.Errorf("expected CHANGEFEED type, got %v", reqlType)
+	}
+}

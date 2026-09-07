@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/leandroasilva/gothinkdb/pkg/datum"
 )
@@ -13,8 +14,11 @@ type Evaluator struct {
 }
 
 type Table struct {
-	Name string
-	Data map[string]datum.Datum
+	Name        string
+	Data        map[string]datum.Datum
+	Indexes     *IndexManager
+	Changefeeds []*Changefeed
+	mu          sync.RWMutex
 }
 
 func NewEvaluator() *Evaluator {
@@ -28,8 +32,10 @@ func (e *Evaluator) GetOrCreateTable(name string) *Table {
 		return table
 	}
 	table := &Table{
-		Name: name,
-		Data: make(map[string]datum.Datum),
+		Name:        name,
+		Data:        make(map[string]datum.Datum),
+		Indexes:     NewIndexManager(),
+		Changefeeds: make([]*Changefeed, 0),
 	}
 	e.tables[name] = table
 	return table
@@ -85,6 +91,16 @@ func (e *Evaluator) evaluateDatum(ctx context.Context, query datum.Datum) (datum
 		return e.evalGet(ctx, arr[1:])
 	case 78: // GET_ALL
 		return e.evalGetAll(ctx, arr[1:])
+	case 75: // INDEX_CREATE
+		return e.evalIndexCreate(ctx, arr[1:])
+	case 76: // INDEX_DROP
+		return e.evalIndexDrop(ctx, arr[1:])
+	case 77: // INDEX_LIST
+		return e.evalIndexList(ctx, arr[1:])
+	case 172: // BETWEEN
+		return e.evalBetween(ctx, arr[1:])
+	case 152: // CHANGES
+		return e.evalChanges(ctx, arr[1:])
 	default:
 		return datum.Datum{}, fmt.Errorf("unsupported term: %d", term)
 	}
@@ -488,4 +504,191 @@ func (e *Evaluator) evalGetAll(ctx context.Context, args []datum.Datum) (datum.D
 	}
 
 	return result, nil
+}
+
+// evalIndexCreate creates a secondary index
+func (e *Evaluator) evalIndexCreate(ctx context.Context, args []datum.Datum) (datum.Datum, error) {
+	if len(args) < 3 {
+		return datum.Datum{}, fmt.Errorf("INDEX_CREATE requires table, name, and field")
+	}
+
+	tableRef, err := e.evalArg(ctx, args[0])
+	if err != nil {
+		return datum.Datum{}, err
+	}
+
+	tableName, ok := e.getTableName(tableRef)
+	if !ok {
+		return datum.Datum{}, fmt.Errorf("invalid table reference")
+	}
+
+	indexName := args[1]
+	if indexName.Type() != datum.Str {
+		return datum.Datum{}, fmt.Errorf("index name must be a string")
+	}
+
+	fieldName := args[2]
+	if fieldName.Type() != datum.Str {
+		return datum.Datum{}, fmt.Errorf("field name must be a string")
+	}
+
+	table := e.GetOrCreateTable(tableName)
+	if err := table.Indexes.CreateIndex(indexName.Str(), fieldName.Str()); err != nil {
+		return datum.Datum{}, err
+	}
+
+	// Build the index from existing data
+	if err := table.Indexes.BuildIndex(indexName.Str(), table.Data); err != nil {
+		return datum.Datum{}, err
+	}
+
+	return datum.NewObject(datum.NewObjectDataFromMap(map[string]datum.Datum{
+		"created": datum.NewNum(1),
+	})), nil
+}
+
+// evalIndexDrop drops a secondary index
+func (e *Evaluator) evalIndexDrop(ctx context.Context, args []datum.Datum) (datum.Datum, error) {
+	if len(args) < 2 {
+		return datum.Datum{}, fmt.Errorf("INDEX_DROP requires table and name")
+	}
+
+	tableRef, err := e.evalArg(ctx, args[0])
+	if err != nil {
+		return datum.Datum{}, err
+	}
+
+	tableName, ok := e.getTableName(tableRef)
+	if !ok {
+		return datum.Datum{}, fmt.Errorf("invalid table reference")
+	}
+
+	indexName := args[1]
+	if indexName.Type() != datum.Str {
+		return datum.Datum{}, fmt.Errorf("index name must be a string")
+	}
+
+	table := e.GetOrCreateTable(tableName)
+	if err := table.Indexes.DropIndex(indexName.Str()); err != nil {
+		return datum.Datum{}, err
+	}
+
+	return datum.NewObject(datum.NewObjectDataFromMap(map[string]datum.Datum{
+		"dropped": datum.NewNum(1),
+	})), nil
+}
+
+// evalIndexList lists all secondary indexes
+func (e *Evaluator) evalIndexList(ctx context.Context, args []datum.Datum) (datum.Datum, error) {
+	if len(args) < 1 {
+		return datum.Datum{}, fmt.Errorf("INDEX_LIST requires table")
+	}
+
+	tableRef, err := e.evalArg(ctx, args[0])
+	if err != nil {
+		return datum.Datum{}, err
+	}
+
+	tableName, ok := e.getTableName(tableRef)
+	if !ok {
+		return datum.Datum{}, fmt.Errorf("invalid table reference")
+	}
+
+	table := e.GetOrCreateTable(tableName)
+	indexes := table.Indexes.ListIndexes()
+
+	result := make([]datum.Datum, len(indexes))
+	for i, name := range indexes {
+		result[i] = datum.NewStr(name)
+	}
+
+	return datum.NewArray(result), nil
+}
+
+// evalBetween queries documents in an index range
+func (e *Evaluator) evalBetween(ctx context.Context, args []datum.Datum) (datum.Datum, error) {
+	if len(args) < 4 {
+		return datum.Datum{}, fmt.Errorf("BETWEEN requires table, index, lower, and upper")
+	}
+
+	tableRef, err := e.evalArg(ctx, args[0])
+	if err != nil {
+		return datum.Datum{}, err
+	}
+
+	tableName, ok := e.getTableName(tableRef)
+	if !ok {
+		return datum.Datum{}, fmt.Errorf("invalid table reference")
+	}
+
+	indexName := args[1]
+	if indexName.Type() != datum.Str {
+		return datum.Datum{}, fmt.Errorf("index name must be a string")
+	}
+
+	lower := args[2]
+	upper := args[3]
+
+	table := e.GetOrCreateTable(tableName)
+	idx, exists := table.Indexes.GetIndex(indexName.Str())
+	if !exists {
+		return datum.Datum{}, fmt.Errorf("index %s does not exist", indexName.Str())
+	}
+
+	// Get document IDs from index
+	docIDs := idx.Between(lower, upper)
+
+	// Retrieve documents
+	result := make([]datum.Datum, 0, len(docIDs))
+	for _, docID := range docIDs {
+		if doc, ok := table.Data[docID]; ok {
+			result = append(result, doc)
+		}
+	}
+
+	return datum.NewArray(result), nil
+}
+
+// evalChanges creates a changefeed
+func (e *Evaluator) evalChanges(ctx context.Context, args []datum.Datum) (datum.Datum, error) {
+	if len(args) < 1 {
+		return datum.Datum{}, fmt.Errorf("CHANGES requires table")
+	}
+
+	tableRef, err := e.evalArg(ctx, args[0])
+	if err != nil {
+		return datum.Datum{}, err
+	}
+
+	tableName, ok := e.getTableName(tableRef)
+	if !ok {
+		return datum.Datum{}, fmt.Errorf("invalid table reference")
+	}
+
+	table := e.GetOrCreateTable(tableName)
+	cf := NewChangefeed(tableName)
+	table.Changefeeds = append(table.Changefeeds, cf)
+
+	// Return a changefeed reference
+	return datum.NewObject(datum.NewObjectDataFromMap(map[string]datum.Datum{
+		"$reql_type$": datum.NewStr("CHANGEFEED"),
+		"table":       datum.NewStr(tableName),
+	})), nil
+}
+
+// notifyChangefeeds notifies all changefeeds of a change
+func (e *Evaluator) notifyChangefeeds(tableName string, oldDoc, newDoc datum.Datum) {
+	table, ok := e.tables[tableName]
+	if !ok {
+		return
+	}
+
+	event := ChangeEvent{
+		OldValue: oldDoc,
+		NewValue: newDoc,
+	}
+
+	for _, cf := range table.Changefeeds {
+		cf.Send(event)
+	}
 }
