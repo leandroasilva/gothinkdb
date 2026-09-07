@@ -6,6 +6,7 @@
 *.dylib
 bin/
 tmp/
+/gothinkdb
 
 # Test binary
 *.test
@@ -50,13 +51,15 @@ logs/
 *.bak
 *.cache
 
-# Dashboard build
+# Dashboard build (generated, copied to cmd/gothinkdb/dashboard/ for embed)
+cmd/gothinkdb/dashboard/
 dashboard/.next/
 dashboard/out/
 dashboard/node_modules/
+dashboard/dist/
 
 # Driver builds
-drivers/js/dist/
-drivers/js/node_modules/
-drivers/rs/target/
-gothinkdb
+drivers/typescript/dist/
+drivers/typescript/node_modules/
+drivers/go/*.test
+drivers/rust/target/

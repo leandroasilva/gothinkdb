@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Connection options for connecting to a GoThinkDB server.
 #[derive(Debug, Clone)]

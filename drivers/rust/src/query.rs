@@ -301,7 +301,8 @@ mod tests {
     fn test_table_query() {
         let r = R::new();
         let q = r.table("users");
-        let term = q.into_query().to_term();
+        let query = q.into_query();
+        let term = query.to_term();
         assert_eq!(term[0], json!(term::TABLE));
     }
 
@@ -394,7 +395,7 @@ mod tests {
         let r = R::new();
         let q = r.db_list();
         let term = q.to_term();
-        assert_eq!(term, json!([term::DB_LIST]));
+        assert_eq!(*term, json!([term::DB_LIST]));
     }
 
     #[test]
@@ -402,7 +403,7 @@ mod tests {
         let r = R::new();
         let q = r.db_create("mydb");
         let term = q.to_term();
-        assert_eq!(term, json!([term::DB_CREATE, "mydb"]));
+        assert_eq!(*term, json!([term::DB_CREATE, "mydb"]));
     }
 
     #[test]
@@ -438,7 +439,8 @@ mod tests {
     fn test_use_db() {
         let r = R::new().use_db("production");
         let q = r.table("users");
-        let term = q.into_query().to_term();
+        let query = q.into_query();
+        let term = query.to_term();
         // term[1] should be [DB, "production"]
         let db_term = term[1].as_array().unwrap();
         assert_eq!(db_term[1], json!("production"));
