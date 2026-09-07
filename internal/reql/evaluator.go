@@ -29,6 +29,11 @@ func NewEvaluator() *Evaluator {
 	}
 }
 
+// GetAdmin returns the admin manager
+func (e *Evaluator) GetAdmin() *AdminManager {
+	return e.admin
+}
+
 func (e *Evaluator) GetOrCreateTable(name string) *Table {
 	if table, ok := e.tables[name]; ok {
 		return table
