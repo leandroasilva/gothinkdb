@@ -121,7 +121,6 @@ func (e *Evaluator) evaluateDatum(ctx context.Context, query datum.Datum) (datum
 		return e.evalInfo(ctx, arr[1:])
 	default:
 		return datum.Datum{}, fmt.Errorf("unsupported term: %d", term)
-		return datum.Datum{}, fmt.Errorf("unsupported term: %d", term)
 	}
 }
 
