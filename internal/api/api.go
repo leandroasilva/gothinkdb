@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/leandroasilva/gothinkdb/internal/reql"
 	"github.com/leandroasilva/gothinkdb/internal/rpc"
@@ -14,20 +15,30 @@ import (
 type Server struct {
 	evaluator *reql.Evaluator
 	cluster   *rpc.ClusterManager
+	wsHub     *WebSocketHub
 	mux       *http.ServeMux
 	mu        sync.RWMutex
 }
 
 // NewServer creates a new API server
 func NewServer(evaluator *reql.Evaluator, cluster *rpc.ClusterManager) *Server {
+	hub := NewWebSocketHub()
+	go hub.Run()
+
 	s := &Server{
 		evaluator: evaluator,
 		cluster:   cluster,
+		wsHub:     hub,
 		mux:       http.NewServeMux(),
 	}
 
 	s.setupRoutes()
 	return s
+}
+
+// GetWebSocketHub returns the WebSocket hub
+func (s *Server) GetWebSocketHub() *WebSocketHub {
+	return s.wsHub
 }
 
 // setupRoutes sets up API routes
@@ -53,6 +64,9 @@ func (s *Server) setupRoutes() {
 	// Server info
 	s.mux.HandleFunc("/api/server/info", s.handleServerInfo)
 	s.mux.HandleFunc("/api/server/stats", s.handleServerStats)
+
+	// Logs
+	s.mux.HandleFunc("/api/logs", s.handleLogs)
 }
 
 // ServeHTTP implements http.Handler
@@ -242,6 +256,49 @@ func (s *Server) handleServerStats(w http.ResponseWriter, r *http.Request) {
 		"connections":        0,
 		"memory_used":        0,
 	})
+}
+
+// handleLogs handles log requests
+func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	// Return sample logs for now; will be connected to real log system
+	logs := []map[string]interface{}{
+		{
+			"id":        "1",
+			"timestamp": time.Now().Add(-5 * time.Minute).Format(time.RFC3339),
+			"level":     "info",
+			"message":   "GoThinkDB server started successfully",
+			"server":    "gothinkdb",
+		},
+		{
+			"id":        "2",
+			"timestamp": time.Now().Add(-4 * time.Minute).Format(time.RFC3339),
+			"level":     "info",
+			"message":   "HTTP admin server listening on :8080",
+			"server":    "gothinkdb",
+		},
+		{
+			"id":        "3",
+			"timestamp": time.Now().Add(-3 * time.Minute).Format(time.RFC3339),
+			"level":     "info",
+			"message":   "ReQL protocol server listening on :28015",
+			"server":    "gothinkdb",
+		},
+		{
+			"id":        "4",
+			"timestamp": time.Now().Add(-2 * time.Minute).Format(time.RFC3339),
+			"level":     "debug",
+			"message":   "Health check endpoint responding",
+			"server":    "gothinkdb",
+		},
+		{
+			"id":        "5",
+			"timestamp": time.Now().Add(-1 * time.Minute).Format(time.RFC3339),
+			"level":     "info",
+			"message":   "Dashboard served at /",
+			"server":    "gothinkdb",
+		},
+	}
+	writeJSON(w, http.StatusOK, logs)
 }
 
 // writeJSON writes JSON response

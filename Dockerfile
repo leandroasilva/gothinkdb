@@ -1,8 +1,22 @@
 # Multi-stage Dockerfile for GoThinkDB
-# Stage 1: Build the Go binary
+# Stage 1: Build the dashboard (React + Vite)
+FROM node:20-alpine AS dashboard-builder
+
+WORKDIR /build/dashboard
+
+# Copy dashboard package files
+COPY dashboard/package.json dashboard/package-lock.json* ./
+RUN npm ci --ignore-scripts 2>/dev/null || npm install --ignore-scripts
+
+# Copy dashboard source
+COPY dashboard/ ./
+
+# Build dashboard
+RUN npm run build
+
+# Stage 2: Build the Go binary
 FROM golang:1.23-alpine AS builder
 
-# Install build dependencies
 RUN apk add --no-cache git make
 
 WORKDIR /build
@@ -14,18 +28,18 @@ RUN go mod download
 # Copy source code
 COPY . .
 
+# Copy dashboard build output for embedding
+COPY --from=dashboard-builder /build/dashboard/dist ./cmd/gothinkdb/dashboard/
+
 # Build the binary with optimizations
-# CGO_ENABLED=0 for static binary
-# -ldflags="-s -w" to strip debug info and reduce size
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-s -w -X main.version=$(git describe --tags --always --dirty 2>/dev/null || echo 'dev')" \
     -o /gothinkdb \
     ./cmd/gothinkdb
 
-# Stage 2: Create minimal runtime image
+# Stage 3: Create minimal runtime image
 FROM alpine:3.19
 
-# Install runtime dependencies
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \
@@ -33,32 +47,20 @@ RUN apk add --no-cache \
     && addgroup -S gothinkdb \
     && adduser -S gothinkdb -G gothinkdb
 
-# Create data directory
 RUN mkdir -p /data/gothinkdb && chown gothinkdb:gothinkdb /data/gothinkdb
 
 WORKDIR /app
 
-# Copy binary from builder
 COPY --from=builder /gothinkdb /app/gothinkdb
 
-# Expose ports
-# 28015 - Driver protocol (ReQL)
-# 8080  - HTTP admin interface
-# 29015 - Cluster communication
 EXPOSE 28015 8080 29015
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8080/api/health || exit 1
 
-# Switch to non-root user
 USER gothinkdb
 
-# Data volume
 VOLUME ["/data/gothinkdb"]
 
-# Entry point
 ENTRYPOINT ["/app/gothinkdb"]
-
-# Default arguments
 CMD ["-data", "/data/gothinkdb"]

@@ -1,0 +1,34 @@
+{
+  "name": "gothinkdb-driver",
+  "version": "1.0.0",
+  "description": "GoThinkDB driver for JavaScript/TypeScript - RethinkDB compatible",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist/**/*"],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["rethinkdb", "gothinkdb", "database", "reql", "driver"],
+  "author": "GoThinkDB Authors",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/leandroasilva/gothinkdb",
+    "directory": "drivers/typescript"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "devDependencies": {
+    "typescript": "~5.6.0",
+    "vitest": "^2.1.0",
+    "@types/node": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
