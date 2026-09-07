@@ -505,6 +505,10 @@ func (d *Datum) FromInterface(val interface{}) error {
 	}
 
 	switch v := val.(type) {
+	case Datum:
+		*d = v
+	case *Datum:
+		*d = *v
 	case bool:
 		*d = NewBool(v)
 	case float64:
