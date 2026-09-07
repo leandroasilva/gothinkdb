@@ -69,6 +69,7 @@ func (h *DefaultHandler) handleStop(ctx context.Context, conn *Connection, query
 // Error types
 var (
 	ErrUnknownQueryType = &ProtocolError{Code: ErrorParam, Message: "Unknown query type"}
+	ErrDatumTooLarge    = &ProtocolError{Code: ErrorParam, Message: "Datum too large"}
 )
 
 // ProtocolError represents a protocol-level error

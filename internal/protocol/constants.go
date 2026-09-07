@@ -2,16 +2,22 @@
 // This package provides compatibility with existing RethinkDB drivers.
 package protocol
 
-// Protocol version magic numbers
+// Protocol version magic numbers (from ql2.proto)
 const (
-	// Version 1.0 (current, with SCRAM authentication)
-	Version1_0 uint32 = 0x3f61bcd1
+	// Version 1.0 (current, with SCRAM-SHA-256 authentication)
+	Version1_0 uint32 = 0x34c2bdc3
 
-	// Legacy versions (for compatibility)
-	Version0_4 uint32 = 0x5f75687a
-	Version0_3 uint32 = 0x5f75687a
-	Version0_2 uint32 = 0x5f75687a
-	Version0_1 uint32 = 0x5f75687a
+	// Legacy versions
+	Version0_4 uint32 = 0x400c2d20 // Queries execute in parallel
+	Version0_3 uint32 = 0x5f75e83e // Authorization key and protocol during handshake
+	Version0_2 uint32 = 0x723081e1 // Authorization key during handshake
+	Version0_1 uint32 = 0x3f61ba36 // Original version
+)
+
+// Protocol format (used in V0_3 and V0_4)
+const (
+	ProtocolProtobuf uint32 = 0x271ffc41
+	ProtocolJSON     uint32 = 0x7e6970c7
 )
 
 // Query types

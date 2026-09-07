@@ -97,7 +97,7 @@ func main() {
 		slog.Error("failed to start protocol server", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("ReQL protocol server starting", "address", cfg.DriverAddress)
+	slog.Info("ReQL protocol server started successfully", "address", cfg.DriverAddress)
 
 	slog.Info("GoThinkDB server started successfully")
 

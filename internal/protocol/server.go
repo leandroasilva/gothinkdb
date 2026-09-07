@@ -14,12 +14,13 @@ import (
 
 // Server represents the ReQL protocol server
 type Server struct {
-	listener  net.Listener
-	addr      string
-	handler   QueryHandler
-	quit      chan struct{}
-	wg        sync.WaitGroup
-	connCount atomic.Int64
+	listener      net.Listener
+	addr          string
+	handler       QueryHandler
+	quit          chan struct{}
+	wg            sync.WaitGroup
+	connCount     atomic.Int64
+	serverVersion string
 }
 
 // QueryHandler handles incoming queries
@@ -30,9 +31,10 @@ type QueryHandler interface {
 // NewServer creates a new protocol server
 func NewServer(addr string, handler QueryHandler) *Server {
 	return &Server{
-		addr:    addr,
-		handler: handler,
-		quit:    make(chan struct{}),
+		addr:          addr,
+		handler:       handler,
+		quit:          make(chan struct{}),
+		serverVersion: "0.1.0",
 	}
 }
 
@@ -113,7 +115,7 @@ func (s *Server) handleConnection(netConn net.Conn) {
 		return
 	}
 
-	slog.Info("connection authenticated", "remote", netConn.RemoteAddr())
+	slog.Info("connection authenticated", "remote", netConn.RemoteAddr(), "version", conn.Version())
 
 	// Handle queries
 	s.queryLoop(conn)
@@ -128,44 +130,124 @@ func (s *Server) handshake(conn *Connection) error {
 
 	slog.Debug("received version", "version", fmt.Sprintf("0x%x", version), "remote", conn.RemoteAddr())
 
-	// Check version
+	// Check version and perform appropriate handshake
 	switch version {
 	case Version1_0:
 		return s.handshakeV1_0(conn)
+	case Version0_4, Version0_3:
+		return s.handshakeV0_3orV0_4(conn, version)
+	case Version0_2, Version0_1:
+		return fmt.Errorf("protocol versions V0_1 and V0_2 are no longer supported (PROBUF protocol removed)")
 	default:
-		// Legacy versions (V0_1 through V0_4) all use the same auth key protocol
-		return s.handshakeLegacy(conn, version)
+		return fmt.Errorf("unsupported protocol version: 0x%x", version)
 	}
 }
 
+// handshakeV1_0 handles V1.0 handshake with SCRAM-SHA-256 authentication
 func (s *Server) handshakeV1_0(conn *Connection) error {
-	// V1.0 uses SCRAM-SHA-256 authentication
-	// For now, accept all connections (authentication will be implemented later)
+	// Step 1: Server sends initial response with version info
+	serverResponse := map[string]interface{}{
+		"success":              true,
+		"max_protocol_version": 0,
+		"min_protocol_version": 0,
+		"server_version":       s.serverVersion,
+	}
 
-	// Send success response
-	response := "SUCCESS\n"
-	if _, err := conn.Write([]byte(response)); err != nil {
-		return fmt.Errorf("failed to send success: %w", err)
+	if err := conn.WriteDatum(serverResponse); err != nil {
+		return fmt.Errorf("failed to send server response: %w", err)
+	}
+
+	// Step 2: Client sends protocol version and authentication method
+	clientMsg, err := conn.ReadDatum()
+	if err != nil {
+		return fmt.Errorf("failed to read client authentication: %w", err)
+	}
+
+	// Validate protocol version
+	protocolVersion, ok := clientMsg["protocol_version"].(float64)
+	if !ok {
+		return fmt.Errorf("invalid protocol_version")
+	}
+	if protocolVersion != 0 {
+		return fmt.Errorf("unsupported protocol_version: %v", protocolVersion)
+	}
+
+	// Validate authentication method
+	authMethod, ok := clientMsg["authentication_method"].(string)
+	if !ok {
+		return fmt.Errorf("invalid authentication_method")
+	}
+	if authMethod != "SCRAM-SHA-256" {
+		return fmt.Errorf("unsupported authentication_method: %s", authMethod)
+	}
+
+	// For now, accept all authentication (simplified)
+	// In production, this would implement full SCRAM-SHA-256
+	authResponse := map[string]interface{}{
+		"success":        true,
+		"authentication": "", // SCRAM challenge would go here
+	}
+
+	if err := conn.WriteDatum(authResponse); err != nil {
+		return fmt.Errorf("failed to send auth response: %w", err)
+	}
+
+	// Step 3: Client sends final authentication message
+	clientFinal, err := conn.ReadDatum()
+	if err != nil {
+		return fmt.Errorf("failed to read client final auth: %w", err)
+	}
+
+	_ = clientFinal // Would validate SCRAM response
+
+	// Step 4: Server sends final success response
+	finalResponse := map[string]interface{}{
+		"success":        true,
+		"authentication": "", // SCRAM server final would go here
+	}
+
+	if err := conn.WriteDatum(finalResponse); err != nil {
+		return fmt.Errorf("failed to send final response: %w", err)
 	}
 
 	conn.SetVersion(Version1_0)
 	return nil
 }
 
-func (s *Server) handshakeLegacy(conn *Connection, version uint32) error {
-	// Legacy versions use auth key
-	// Read auth key (null-terminated string)
-	authKey, err := conn.ReadNullTerminated()
-	if err != nil {
+// handshakeV0_3orV0_4 handles V0_3 and V0_4 handshake with plaintext auth key
+func (s *Server) handshakeV0_3orV0_4(conn *Connection, version uint32) error {
+	// Read auth key size (4 bytes, little-endian)
+	var authKeySize uint32
+	if err := binary.Read(conn, binary.LittleEndian, &authKeySize); err != nil {
+		return fmt.Errorf("failed to read auth key size: %w", err)
+	}
+
+	if authKeySize > 2048 {
+		return fmt.Errorf("auth key too large: %d bytes", authKeySize)
+	}
+
+	// Read auth key
+	authKey := make([]byte, authKeySize)
+	if _, err := io.ReadFull(conn, authKey); err != nil {
 		return fmt.Errorf("failed to read auth key: %w", err)
 	}
 
 	// For now, accept all auth keys (empty or not)
 	_ = authKey
 
+	// Read wire protocol (4 bytes, little-endian)
+	var wireProtocol uint32
+	if err := binary.Read(conn, binary.LittleEndian, &wireProtocol); err != nil {
+		return fmt.Errorf("failed to read wire protocol: %w", err)
+	}
+
+	// Validate wire protocol
+	if wireProtocol != ProtocolJSON {
+		return fmt.Errorf("unsupported wire protocol: 0x%x (only JSON is supported)", wireProtocol)
+	}
+
 	// Send success response
-	response := "SUCCESS\n"
-	if _, err := conn.Write([]byte(response)); err != nil {
+	if _, err := conn.Write([]byte("SUCCESS\000")); err != nil {
 		return fmt.Errorf("failed to send success: %w", err)
 	}
 
@@ -273,10 +355,12 @@ func (s *Server) queryLoop(conn *Connection) {
 		case QueryServerInfo:
 			s.sendResponse(conn, query.Token, &Response{
 				Type: ResponseSuccessAtom,
-				Data: map[string]interface{}{
-					"id":      "gothinkdb-server",
-					"name":    "gothinkdb",
-					"version": "0.1.0",
+				Data: []interface{}{
+					map[string]interface{}{
+						"id":      "gothinkdb-server",
+						"name":    "gothinkdb",
+						"version": s.serverVersion,
+					},
 				},
 			})
 

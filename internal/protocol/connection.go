@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bufio"
+	"encoding/json"
 	"net"
 	"time"
 )
@@ -55,4 +56,40 @@ func (c *Connection) SetReadDeadline(t time.Time) error {
 // SetWriteDeadline sets the write deadline
 func (c *Connection) SetWriteDeadline(t time.Time) error {
 	return c.Conn.SetWriteDeadline(t)
+}
+
+// WriteDatum writes a null-terminated JSON datum to the connection
+func (c *Connection) WriteDatum(v interface{}) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	// Append null terminator
+	data = append(data, 0)
+	_, err = c.Conn.Write(data)
+	return err
+}
+
+// ReadDatum reads a null-terminated JSON datum from the connection
+func (c *Connection) ReadDatum() (map[string]interface{}, error) {
+	var result []byte
+	for {
+		b, err := c.reader.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		if b == 0 {
+			break
+		}
+		result = append(result, b)
+		if len(result) > 2048 {
+			return nil, ErrDatumTooLarge
+		}
+	}
+
+	var datum map[string]interface{}
+	if err := json.Unmarshal(result, &datum); err != nil {
+		return nil, err
+	}
+	return datum, nil
 }
