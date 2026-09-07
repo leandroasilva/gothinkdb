@@ -68,7 +68,7 @@ export function DashboardPage() {
   const dbCount = Array.isArray(databases) ? databases.length : 0
   const tableCount = Array.isArray(tables) ? tables.length : 0
   const memberCount = clusterStatus?.members
-    ? Object.keys(clusterStatus.members).length || clusterStatus.members
+    ? Object.keys(clusterStatus.members).length
     : 0
 
   return (
