@@ -85,6 +85,7 @@ func (t *BTree) Put(ctx context.Context, key, value []byte) error {
 	}
 
 	if newRoot != storage.InvalidBlockID {
+		// The root was split, create a new root
 		t.rootID = newRoot
 	}
 
@@ -117,7 +118,17 @@ func (t *BTree) put(ctx context.Context, nodeID storage.BlockID, key, value []by
 
 		// Split if full
 		if node.IsFull() {
-			return t.splitLeaf(ctx, node)
+			rightID, separator, err := t.splitLeaf(ctx, node)
+			if err != nil {
+				return storage.InvalidBlockID, err
+			}
+
+			// If this is the root, create a new root
+			if nodeID == t.rootID {
+				return t.createRoot(ctx, node.blockID, rightID, separator)
+			}
+
+			return rightID, nil
 		}
 
 		return storage.InvalidBlockID, nil
@@ -153,65 +164,98 @@ func (t *BTree) put(ctx context.Context, nodeID storage.BlockID, key, value []by
 
 		// Split if full
 		if node.IsFull() {
-			return t.splitInternal(ctx, node)
+			rightID, separator, err := t.splitInternal(ctx, node)
+			if err != nil {
+				return storage.InvalidBlockID, err
+			}
+
+			// If this is the root, create a new root
+			if nodeID == t.rootID {
+				return t.createRoot(ctx, node.blockID, rightID, separator)
+			}
+
+			return rightID, nil
 		}
 	}
 
 	return storage.InvalidBlockID, nil
 }
 
-func (t *BTree) splitLeaf(ctx context.Context, node *LeafNode) (storage.BlockID, error) {
+// createRoot creates a new root node when the old root splits
+func (t *BTree) createRoot(ctx context.Context, leftID, rightID storage.BlockID, separator []byte) (storage.BlockID, error) {
+	// Create a new internal node as the root
+	newRoot := NewInternalNode(storage.InvalidBlockID)
+	newRoot.children = append(newRoot.children, leftID, rightID)
+	newRoot.keys = append(newRoot.keys, separator)
+	newRoot.numKeys = 1
+
+	// Serialize and allocate
+	data := newRoot.Serialize()
+	block := storage.NewBlockFromData(data)
+	rootID, err := t.cache.Allocate(ctx, block)
+	if err != nil {
+		return storage.InvalidBlockID, err
+	}
+
+	return rootID, nil
+}
+
+func (t *BTree) splitLeaf(ctx context.Context, node *LeafNode) (storage.BlockID, []byte, error) {
 	// Allocate new block for right node
 	rightBlock := storage.NewBlock()
 	rightID, err := t.cache.Allocate(ctx, rightBlock)
 	if err != nil {
-		return storage.InvalidBlockID, err
+		return storage.InvalidBlockID, nil, err
 	}
 
 	// Split the node
 	right := node.Split(rightID)
 
+	// Get the separator key (first key of right node)
+	separator := make([]byte, len(right.keys[0]))
+	copy(separator, right.keys[0])
+
 	// Write both nodes
 	leftData := node.Serialize()
 	leftBlock := storage.NewBlockFromData(leftData)
 	if err := t.cache.Put(ctx, node.blockID, leftBlock); err != nil {
-		return storage.InvalidBlockID, err
+		return storage.InvalidBlockID, nil, err
 	}
 
 	rightData := right.Serialize()
 	rightBlock = storage.NewBlockFromData(rightData)
 	if err := t.cache.Put(ctx, rightID, rightBlock); err != nil {
-		return storage.InvalidBlockID, err
+		return storage.InvalidBlockID, nil, err
 	}
 
-	return rightID, nil
+	return rightID, separator, nil
 }
 
-func (t *BTree) splitInternal(ctx context.Context, node *InternalNode) (storage.BlockID, error) {
+func (t *BTree) splitInternal(ctx context.Context, node *InternalNode) (storage.BlockID, []byte, error) {
 	// Allocate new block for right node
 	rightBlock := storage.NewBlock()
 	rightID, err := t.cache.Allocate(ctx, rightBlock)
 	if err != nil {
-		return storage.InvalidBlockID, err
+		return storage.InvalidBlockID, nil, err
 	}
 
 	// Split the node
-	right, _ := node.Split(rightID)
+	right, separator := node.Split(rightID)
 
 	// Write both nodes
 	leftData := node.Serialize()
 	leftBlock := storage.NewBlockFromData(leftData)
 	if err := t.cache.Put(ctx, node.blockID, leftBlock); err != nil {
-		return storage.InvalidBlockID, err
+		return storage.InvalidBlockID, nil, err
 	}
 
 	rightData := right.Serialize()
 	rightBlock = storage.NewBlockFromData(rightData)
 	if err := t.cache.Put(ctx, rightID, rightBlock); err != nil {
-		return storage.InvalidBlockID, err
+		return storage.InvalidBlockID, nil, err
 	}
 
-	return rightID, nil
+	return rightID, separator, nil
 }
 
 // Delete removes a key from the B-Tree
