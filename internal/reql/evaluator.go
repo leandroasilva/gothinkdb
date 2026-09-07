@@ -11,6 +11,7 @@ import (
 
 type Evaluator struct {
 	tables map[string]*Table
+	admin  *AdminManager
 }
 
 type Table struct {
@@ -24,6 +25,7 @@ type Table struct {
 func NewEvaluator() *Evaluator {
 	return &Evaluator{
 		tables: make(map[string]*Table),
+		admin:  NewAdminManager(),
 	}
 }
 
@@ -101,7 +103,24 @@ func (e *Evaluator) evaluateDatum(ctx context.Context, query datum.Datum) (datum
 		return e.evalBetween(ctx, arr[1:])
 	case 152: // CHANGES
 		return e.evalChanges(ctx, arr[1:])
+	case 57: // DB_CREATE
+		return e.evalDBCreate(ctx, arr[1:])
+	case 58: // DB_DROP
+		return e.evalDBDrop(ctx, arr[1:])
+	case 59: // DB_LIST
+		return e.evalDBList(ctx, arr[1:])
+	case 60: // TABLE_CREATE
+		return e.evalTableCreate(ctx, arr[1:])
+	case 61: // TABLE_DROP
+		return e.evalTableDrop(ctx, arr[1:])
+	case 62: // TABLE_LIST
+		return e.evalTableList(ctx, arr[1:])
+	case 137: // STATUS
+		return e.evalStatus(ctx, arr[1:])
+	case 138: // INFO
+		return e.evalInfo(ctx, arr[1:])
 	default:
+		return datum.Datum{}, fmt.Errorf("unsupported term: %d", term)
 		return datum.Datum{}, fmt.Errorf("unsupported term: %d", term)
 	}
 }
@@ -691,4 +710,188 @@ func (e *Evaluator) notifyChangefeeds(tableName string, oldDoc, newDoc datum.Dat
 	for _, cf := range table.Changefeeds {
 		cf.Send(event)
 	}
+}
+
+// evalDBCreate creates a new database
+func (e *Evaluator) evalDBCreate(ctx context.Context, args []datum.Datum) (datum.Datum, error) {
+	if len(args) < 1 {
+		return datum.Datum{}, fmt.Errorf("DB_CREATE requires database name")
+	}
+
+	dbName := args[0]
+	if dbName.Type() != datum.Str {
+		return datum.Datum{}, fmt.Errorf("database name must be a string")
+	}
+
+	if err := e.admin.CreateDatabase(dbName.Str()); err != nil {
+		return datum.Datum{}, err
+	}
+
+	return datum.NewObject(datum.NewObjectDataFromMap(map[string]datum.Datum{
+		"dbs_created": datum.NewNum(1),
+	})), nil
+}
+
+// evalDBDrop drops a database
+func (e *Evaluator) evalDBDrop(ctx context.Context, args []datum.Datum) (datum.Datum, error) {
+	if len(args) < 1 {
+		return datum.Datum{}, fmt.Errorf("DB_DROP requires database name")
+	}
+
+	dbName := args[0]
+	if dbName.Type() != datum.Str {
+		return datum.Datum{}, fmt.Errorf("database name must be a string")
+	}
+
+	if err := e.admin.DropDatabase(dbName.Str()); err != nil {
+		return datum.Datum{}, err
+	}
+
+	return datum.NewObject(datum.NewObjectDataFromMap(map[string]datum.Datum{
+		"dbs_dropped": datum.NewNum(1),
+	})), nil
+}
+
+// evalDBList lists all databases
+func (e *Evaluator) evalDBList(ctx context.Context, args []datum.Datum) (datum.Datum, error) {
+	databases := e.admin.ListDatabases()
+
+	result := make([]datum.Datum, len(databases))
+	for i, name := range databases {
+		result[i] = datum.NewStr(name)
+	}
+
+	return datum.NewArray(result), nil
+}
+
+// evalTableCreate creates a new table
+func (e *Evaluator) evalTableCreate(ctx context.Context, args []datum.Datum) (datum.Datum, error) {
+	if len(args) < 1 {
+		return datum.Datum{}, fmt.Errorf("TABLE_CREATE requires table name")
+	}
+
+	tableName := args[0]
+	if tableName.Type() != datum.Str {
+		return datum.Datum{}, fmt.Errorf("table name must be a string")
+	}
+
+	// Default to "test" database if not specified
+	dbName := "test"
+	if len(args) > 1 {
+		// Check if second arg is a database reference
+		if args[1].Type() == datum.Object {
+			if dbRef, ok := args[1].Object().Get("db"); ok {
+				if dbRef.Type() == datum.Str {
+					dbName = dbRef.Str()
+				}
+			}
+		}
+	}
+
+	if err := e.admin.CreateTable(dbName, tableName.Str()); err != nil {
+		return datum.Datum{}, err
+	}
+
+	return datum.NewObject(datum.NewObjectDataFromMap(map[string]datum.Datum{
+		"tables_created": datum.NewNum(1),
+	})), nil
+}
+
+// evalTableDrop drops a table
+func (e *Evaluator) evalTableDrop(ctx context.Context, args []datum.Datum) (datum.Datum, error) {
+	if len(args) < 1 {
+		return datum.Datum{}, fmt.Errorf("TABLE_DROP requires table name")
+	}
+
+	tableName := args[0]
+	if tableName.Type() != datum.Str {
+		return datum.Datum{}, fmt.Errorf("table name must be a string")
+	}
+
+	// Default to "test" database if not specified
+	dbName := "test"
+	if len(args) > 1 {
+		// Check if second arg is a database reference
+		if args[1].Type() == datum.Object {
+			if dbRef, ok := args[1].Object().Get("db"); ok {
+				if dbRef.Type() == datum.Str {
+					dbName = dbRef.Str()
+				}
+			}
+		}
+	}
+
+	if err := e.admin.DropTable(dbName, tableName.Str()); err != nil {
+		return datum.Datum{}, err
+	}
+
+	return datum.NewObject(datum.NewObjectDataFromMap(map[string]datum.Datum{
+		"tables_dropped": datum.NewNum(1),
+	})), nil
+}
+
+// evalTableList lists all tables in a database
+func (e *Evaluator) evalTableList(ctx context.Context, args []datum.Datum) (datum.Datum, error) {
+	// Default to "test" database if not specified
+	dbName := "test"
+	if len(args) > 0 {
+		// Check if arg is a database reference
+		if args[0].Type() == datum.Object {
+			if dbRef, ok := args[0].Object().Get("db"); ok {
+				if dbRef.Type() == datum.Str {
+					dbName = dbRef.Str()
+				}
+			}
+		}
+	}
+
+	tables, err := e.admin.ListTables(dbName)
+	if err != nil {
+		return datum.Datum{}, err
+	}
+
+	result := make([]datum.Datum, len(tables))
+	for i, name := range tables {
+		result[i] = datum.NewStr(name)
+	}
+
+	return datum.NewArray(result), nil
+}
+
+// evalStatus gets server status
+func (e *Evaluator) evalStatus(ctx context.Context, args []datum.Datum) (datum.Datum, error) {
+	status := e.admin.GetServerStatus()
+
+	result := make(map[string]datum.Datum)
+	for k, v := range status {
+		switch val := v.(type) {
+		case string:
+			result[k] = datum.NewStr(val)
+		case int:
+			result[k] = datum.NewNum(float64(val))
+		default:
+			result[k] = datum.NewStr(fmt.Sprintf("%v", val))
+		}
+	}
+
+	return datum.NewObject(datum.NewObjectDataFromMap(result)), nil
+}
+
+// evalInfo gets server info
+func (e *Evaluator) evalInfo(ctx context.Context, args []datum.Datum) (datum.Datum, error) {
+	config := e.admin.GetConfig()
+
+	result := make(map[string]datum.Datum)
+	for k, v := range config {
+		switch val := v.(type) {
+		case string:
+			result[k] = datum.NewStr(val)
+		case int:
+			result[k] = datum.NewNum(float64(val))
+		default:
+			result[k] = datum.NewStr(fmt.Sprintf("%v", val))
+		}
+	}
+
+	return datum.NewObject(datum.NewObjectDataFromMap(result)), nil
 }

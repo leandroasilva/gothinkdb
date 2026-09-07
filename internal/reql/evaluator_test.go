@@ -558,3 +558,185 @@ func TestEvaluator_Changes(t *testing.T) {
 		t.Errorf("expected CHANGEFEED type, got %v", reqlType)
 	}
 }
+
+func TestEvaluator_DBCreate(t *testing.T) {
+	eval := NewEvaluator()
+	ctx := context.Background()
+
+	// Create database
+	dbCreateQuery := []interface{}{
+		float64(57),
+		"mydb",
+	}
+	result, err := eval.Evaluate(ctx, dbCreateQuery)
+	if err != nil {
+		t.Fatalf("db_create failed: %v", err)
+	}
+
+	dbsCreated, ok := result.Object().Get("dbs_created")
+	if !ok || dbsCreated.Num() != 1 {
+		t.Errorf("expected dbs_created=1, got %v", dbsCreated)
+	}
+}
+
+func TestEvaluator_DBList(t *testing.T) {
+	eval := NewEvaluator()
+	ctx := context.Background()
+
+	// Create databases
+	for _, dbName := range []string{"db1", "db2", "db3"} {
+		dbCreateQuery := []interface{}{float64(57), dbName}
+		_, err := eval.Evaluate(ctx, dbCreateQuery)
+		if err != nil {
+			t.Fatalf("db_create %s failed: %v", dbName, err)
+		}
+	}
+
+	// List databases
+	dbListQuery := []interface{}{float64(59)}
+	result, err := eval.Evaluate(ctx, dbListQuery)
+	if err != nil {
+		t.Fatalf("db_list failed: %v", err)
+	}
+
+	// Should have 4 databases: test (default) + db1, db2, db3
+	if len(result.Array()) != 4 {
+		t.Errorf("expected 4 databases, got %d", len(result.Array()))
+	}
+}
+
+func TestEvaluator_DBDrop(t *testing.T) {
+	eval := NewEvaluator()
+	ctx := context.Background()
+
+	// Create database
+	dbCreateQuery := []interface{}{float64(57), "tempdb"}
+	_, err := eval.Evaluate(ctx, dbCreateQuery)
+	if err != nil {
+		t.Fatalf("db_create failed: %v", err)
+	}
+
+	// Drop database
+	dbDropQuery := []interface{}{float64(58), "tempdb"}
+	result, err := eval.Evaluate(ctx, dbDropQuery)
+	if err != nil {
+		t.Fatalf("db_drop failed: %v", err)
+	}
+
+	dbsDropped, ok := result.Object().Get("dbs_dropped")
+	if !ok || dbsDropped.Num() != 1 {
+		t.Errorf("expected dbs_dropped=1, got %v", dbsDropped)
+	}
+}
+
+func TestEvaluator_TableCreate(t *testing.T) {
+	eval := NewEvaluator()
+	ctx := context.Background()
+
+	// Create table
+	tableCreateQuery := []interface{}{
+		float64(60),
+		"users",
+	}
+	result, err := eval.Evaluate(ctx, tableCreateQuery)
+	if err != nil {
+		t.Fatalf("table_create failed: %v", err)
+	}
+
+	tablesCreated, ok := result.Object().Get("tables_created")
+	if !ok || tablesCreated.Num() != 1 {
+		t.Errorf("expected tables_created=1, got %v", tablesCreated)
+	}
+}
+
+func TestEvaluator_TableList(t *testing.T) {
+	eval := NewEvaluator()
+	ctx := context.Background()
+
+	// Create tables
+	for _, tableName := range []string{"users", "posts", "comments"} {
+		tableCreateQuery := []interface{}{float64(60), tableName}
+		_, err := eval.Evaluate(ctx, tableCreateQuery)
+		if err != nil {
+			t.Fatalf("table_create %s failed: %v", tableName, err)
+		}
+	}
+
+	// List tables
+	tableListQuery := []interface{}{float64(62)}
+	result, err := eval.Evaluate(ctx, tableListQuery)
+	if err != nil {
+		t.Fatalf("table_list failed: %v", err)
+	}
+
+	if len(result.Array()) != 3 {
+		t.Errorf("expected 3 tables, got %d", len(result.Array()))
+	}
+}
+
+func TestEvaluator_TableDrop(t *testing.T) {
+	eval := NewEvaluator()
+	ctx := context.Background()
+
+	// Create table
+	tableCreateQuery := []interface{}{float64(60), "temp_table"}
+	_, err := eval.Evaluate(ctx, tableCreateQuery)
+	if err != nil {
+		t.Fatalf("table_create failed: %v", err)
+	}
+
+	// Drop table
+	tableDropQuery := []interface{}{float64(61), "temp_table"}
+	result, err := eval.Evaluate(ctx, tableDropQuery)
+	if err != nil {
+		t.Fatalf("table_drop failed: %v", err)
+	}
+
+	tablesDropped, ok := result.Object().Get("tables_dropped")
+	if !ok || tablesDropped.Num() != 1 {
+		t.Errorf("expected tables_dropped=1, got %v", tablesDropped)
+	}
+}
+
+func TestEvaluator_Status(t *testing.T) {
+	eval := NewEvaluator()
+	ctx := context.Background()
+
+	// Get status
+	statusQuery := []interface{}{float64(137)}
+	result, err := eval.Evaluate(ctx, statusQuery)
+	if err != nil {
+		t.Fatalf("status failed: %v", err)
+	}
+
+	// Check that result has expected fields
+	if _, ok := result.Object().Get("id"); !ok {
+		t.Error("expected id field in status")
+	}
+	if _, ok := result.Object().Get("name"); !ok {
+		t.Error("expected name field in status")
+	}
+	if _, ok := result.Object().Get("version"); !ok {
+		t.Error("expected version field in status")
+	}
+}
+
+func TestEvaluator_Info(t *testing.T) {
+	eval := NewEvaluator()
+	ctx := context.Background()
+
+	// Get info
+	infoQuery := []interface{}{float64(138)}
+	result, err := eval.Evaluate(ctx, infoQuery)
+	if err != nil {
+		t.Fatalf("info failed: %v", err)
+	}
+
+	// Check that result has expected fields
+	if _, ok := result.Object().Get("server_name"); !ok {
+		t.Error("expected server_name field in info")
+	}
+	if _, ok := result.Object().Get("version"); !ok {
+		t.Error("expected version field in info")
+	}
+}
