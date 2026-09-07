@@ -74,6 +74,9 @@ func main() {
 		fmt.Fprintf(w, `{"status":"ok","server":"%s","version":"0.1.0"}`, cfg.ServerName)
 	})
 
+	// Serve dashboard
+	mux.Handle("/", http.FileServer(http.Dir("web/dashboard")))
+
 	httpServer := &http.Server{
 		Addr:         cfg.HTTPAddress,
 		Handler:      mux,

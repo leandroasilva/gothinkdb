@@ -59,3 +59,4 @@ dashboard/node_modules/
 drivers/js/dist/
 drivers/js/node_modules/
 drivers/rs/target/
+gothinkdb
