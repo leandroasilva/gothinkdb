@@ -5,11 +5,13 @@ import (
 	"embed"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -81,13 +83,38 @@ func main() {
 	// Create API server with all routes
 	apiServer := api.NewServer(evaluator, cluster)
 
-	// Setup dashboard file server from embedded FS
+	// Setup dashboard file server from embedded FS with SPA fallback
 	dashboardSub, err := fs.Sub(dashboardFS, "dashboard")
 	if err != nil {
 		slog.Error("failed to create dashboard sub filesystem", "error", err)
 		os.Exit(1)
 	}
-	dashboardHandler := http.FileServer(http.FS(dashboardSub))
+	fileServer := http.FileServer(http.FS(dashboardSub))
+
+	// SPA fallback handler: serve index.html for client-side routes
+	spaHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Try to open the requested file
+		path := r.URL.Path
+		if path == "/" {
+			path = "/index.html"
+		}
+		f, err := dashboardSub.Open(strings.TrimPrefix(path, "/"))
+		if err != nil {
+			// File not found - serve index.html for SPA routing
+			indexFile, err := dashboardSub.Open("index.html")
+			if err != nil {
+				http.Error(w, "index.html not found", http.StatusInternalServerError)
+				return
+			}
+			defer indexFile.Close()
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			io.Copy(w, indexFile)
+			return
+		}
+		f.Close()
+		// File exists, serve it
+		fileServer.ServeHTTP(w, r)
+	})
 
 	// Create main mux that combines API + dashboard
 	mux := http.NewServeMux()
@@ -95,8 +122,8 @@ func main() {
 	// Register all API routes via api.Server
 	mux.Handle("/api/", apiServer)
 
-	// Serve dashboard as fallback
-	mux.Handle("/", dashboardHandler)
+	// Serve dashboard with SPA fallback
+	mux.Handle("/", spaHandler)
 
 	httpServer := &http.Server{
 		Addr:         cfg.HTTPAddress,

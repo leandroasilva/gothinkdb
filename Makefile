@@ -51,7 +51,7 @@ help:
 
 docker-build:
 	@echo "Building Docker image (with dashboard)..."
-	docker build -t gothinkdb:latest .
+	docker compose build
 
 docker-up: docker-build
 	@echo "Starting single-node GoThinkDB..."

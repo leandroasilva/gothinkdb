@@ -5,6 +5,7 @@ version: '3.8'
 
 services:
   gothinkdb-node1:
+    image: gothinkdb:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -38,6 +39,7 @@ services:
       - gothinkdb-cluster
 
   gothinkdb-node2:
+    image: gothinkdb:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -76,6 +78,7 @@ services:
       - gothinkdb-cluster
 
   gothinkdb-node3:
+    image: gothinkdb:latest
     build:
       context: .
       dockerfile: Dockerfile

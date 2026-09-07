@@ -5,6 +5,7 @@ version: '3.8'
 
 services:
   gothinkdb:
+    image: gothinkdb:latest
     build:
       context: .
       dockerfile: Dockerfile
