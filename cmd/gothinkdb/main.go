@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/leandroasilva/gothinkdb/internal/config"
+	"github.com/leandroasilva/gothinkdb/internal/protocol"
 )
 
 func main() {
@@ -89,8 +90,14 @@ func main() {
 		}
 	}()
 
-	// TODO: Fase 2 - Start TCP driver server on cfg.DriverAddress
-	// TODO: Fase 8 - Start cluster communication on cfg.ClusterAddress
+	// Start protocol server (ReQL)
+	handler := protocol.NewDefaultHandler()
+	protocolServer := protocol.NewServer(cfg.DriverAddress, handler)
+	if err := protocolServer.Start(); err != nil {
+		slog.Error("failed to start protocol server", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("ReQL protocol server starting", "address", cfg.DriverAddress)
 
 	slog.Info("GoThinkDB server started successfully")
 
@@ -100,6 +107,11 @@ func main() {
 	<-quit
 
 	slog.Info("shutting down GoThinkDB...")
+
+	// Stop protocol server
+	if err := protocolServer.Stop(); err != nil {
+		slog.Error("protocol server shutdown error", "error", err)
+	}
 
 	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
