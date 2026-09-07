@@ -53,63 +53,105 @@ make docker-cluster-up
 
 ### JavaScript/TypeScript
 
-```javascript
-const r = require('rethinkdb');
+```bash
+npm install gothinkdb-driver
+```
 
-const conn = await r.connect({host: 'localhost', port: 28015});
+```typescript
+import { connect, r } from 'gothinkdb-driver';
+
+const conn = await connect({ host: 'localhost', port: 28015 });
 
 // Create a table
 await r.db('test').tableCreate('users').run(conn);
 
 // Insert data
 await r.table('users').insert({
-  id: 1,
   name: 'John Doe',
   email: 'john@example.com'
 }).run(conn);
 
 // Query data
-const cursor = await r.table('users').filter({name: 'John Doe'}).run(conn);
-const users = await cursor.toArray();
-console.log(users);
+const users = await r.table('users')
+  .filter({ name: 'John Doe' })
+  .run(conn);
 
 // Real-time changefeed
 const feed = await r.table('users').changes().run(conn);
-feed.each((err, change) => {
-  console.log('Change:', change);
-});
 ```
 
 ### Go
+
+```bash
+go get github.com/leandroasilva/gothinkdb/drivers/go
+```
 
 ```go
 package main
 
 import (
     "fmt"
-    "github.com/leandroasilva/gothinkdb/drivers/go"
+    gothinkdb "github.com/leandroasilva/gothinkdb/drivers/go"
 )
 
 func main() {
-    conn, err := gothinkdb.Connect("localhost:28015")
+    conn, err := gothinkdb.Connect(gothinkdb.ConnectOptions{
+        Host: "localhost",
+        Port: 28015,
+    })
     if err != nil {
         panic(err)
     }
     defer conn.Close()
 
+    r := gothinkdb.NewRWithConn(conn)
+
     // Create table
-    err = gothinkdb.TableCreate(conn, "test", "users")
-    
-    // Insert
-    err = gothinkdb.Insert(conn, "test.users", map[string]interface{}{
-        "id": 1,
-        "name": "John Doe",
-    })
-    
-    // Query
-    results, err := gothinkdb.Table(conn, "test.users").
+    r.DB("test").TableCreate("users").Run(conn)
+
+    // Insert data
+    r.Table("users").Insert(map[string]interface{}{
+        "name":  "John Doe",
+        "email": "john@example.com",
+    }).Run(conn)
+
+    // Query data
+    results, _ := r.Table("users").
         Filter(map[string]interface{}{"name": "John Doe"}).
-        Run()
+        Run(conn)
+    fmt.Println(string(results))
+}
+```
+
+### Rust
+
+```bash
+# Cargo.toml
+# gothinkdb = "0.1"
+```
+
+```rust
+use gothinkdb::{Connection, ConnectOptions, R};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let conn = Connection::connect(ConnectOptions::default()).await?;
+    let r = R::new();
+
+    // Insert a document
+    r.table("users")
+        .insert(serde_json::json!({"name": "Alice"}))
+        .run(&conn).await?;
+
+    // Query documents
+    let results = r.table("users")
+        .into_query()
+        .filter(serde_json::json!({"active": true}))
+        .run(&conn).await?;
+
+    println!("Results: {:?}", results);
+    conn.close().await?;
+    Ok(())
 }
 ```
 
@@ -118,7 +160,9 @@ func main() {
 ### Prerequisites
 
 - Docker and Docker Compose
-- Go 1.23+ (optional, for local development)
+- Go 1.23+ (for building the server)
+- Node.js 20+ (for dashboard development)
+- Rust (optional, for Rust driver development)
 - Make
 
 ### Common Commands
@@ -127,14 +171,30 @@ func main() {
 # Show all available commands
 make help
 
-# Build Docker image
-make docker-build
+# Docker
+make docker-build          # Build Docker image (multi-stage)
+make docker-up             # Start single node
+make docker-cluster-up     # Start 3-node cluster
+make docker-down           # Stop all containers
+make docker-logs           # View logs
 
-# Run tests in Docker
-make test-docker
+# Dashboard
+make dashboard-install     # Install dashboard dependencies
+make dashboard-dev         # Run dashboard dev server
+make dashboard-build       # Build dashboard for production
 
-# Clean up everything
-make clean
+# Drivers
+make driver-ts-test        # Test TypeScript driver
+make driver-go-test        # Test Go driver
+make driver-rust-test      # Test Rust driver
+
+# Testing
+make test                  # Run all Go tests
+make test-docker           # Run tests in Docker
+
+# Build
+make build                 # Build Go binary
+make clean                 # Clean build artifacts
 ```
 
 ### Local Development (with Go installed)
@@ -156,47 +216,88 @@ make build
 make dev
 ```
 
+## Dashboard
+
+GoThinkDB includes a full-featured web dashboard built with React, TypeScript, Tailwind CSS, and shadcn/ui.
+
+### Pages
+
+- **Dashboard** - Cluster overview with status cards, performance charts (queries/sec, latency), server statistics, and alerts
+- **Tables** - Browse databases and tables, view document counts, create/drop tables, manage indexes
+- **Servers** - Monitor connected servers with status, uptime, and resource usage
+- **Data Explorer** - Interactive ReQL query editor with syntax highlighting, query history, and results in JSON/table view
+- **Logs** - Real-time log viewer with severity and server filters
+
+### Real-time Updates
+
+The dashboard connects via WebSocket for live updates on server stats, table changes, and log entries.
+
+### Development
+
+```bash
+# Install dashboard dependencies
+cd dashboard && npm install
+
+# Run dashboard dev server (proxies API to localhost:8080)
+npm run dev
+
+# Build dashboard for production
+npm run build
+```
+
+The dashboard build output (`dashboard/dist/`) is embedded into the Go binary via `go:embed`.
+
 ## Architecture
 
 GoThinkDB is built with a clean, modular architecture:
 
 ```
 gothinkdb/
-├── cmd/gothinkdb/        # Main binary
+├── cmd/gothinkdb/           # Main binary (embeds dashboard)
 ├── internal/
-│   ├── protocol/          # Wire protocol (ReQL compatible)
-│   ├── query/             # Query parser and evaluator
-│   ├── storage/           # Storage engine (B-tree, page cache)
-│   ├── cluster/           # Clustering, Raft, replication
-│   ├── admin/             # HTTP admin API
-│   ├── rpc/               # Inter-node communication
-│   └── config/            # Configuration
+│   ├── protocol/            # Wire protocol (ReQL compatible)
+│   ├── query/               # Query parser and evaluator (ReQL)
+│   ├── storage/             # Storage engine (B-tree, page cache)
+│   ├── cluster/             # Clustering, Raft, replication
+│   ├── api/                 # HTTP admin API + WebSocket
+│   ├── rpc/                 # Inter-node communication
+│   └── config/              # Configuration
 ├── pkg/
-│   └── datum/             # ReQL data types
-├── drivers/               # Client drivers
-│   ├── go/                # Go driver
-│   ├── js/                # JavaScript/TypeScript driver
-│   └── rs/                # Rust driver
-└── dashboard/             # Web dashboard (shadcn-ui)
+│   └── datum/               # ReQL data types
+├── dashboard/               # Web dashboard (React + shadcn/ui)
+│   ├── src/
+│   │   ├── pages/           # Dashboard, Tables, Servers, Explorer, Logs
+│   │   ├── components/      # UI components (shadcn/ui)
+│   │   └── hooks/           # React hooks (useRealtime)
+│   └── dist/                # Build output (embedded in Go binary)
+├── drivers/
+│   ├── typescript/          # TypeScript/JavaScript driver (npm: gothinkdb-driver)
+│   ├── go/                  # Go driver (module: github.com/leandroasilva/gothinkdb/drivers/go)
+│   └── rust/                # Rust driver (crate: gothinkdb)
+├── docker/
+│   ├── Dockerfile.single    # Single-node Docker
+│   └── docker-compose.*     # Cluster configurations
+├── Dockerfile               # Multi-stage build (Node.js + Go + Alpine)
+└── Makefile                 # Build, test, and deployment targets
 ```
 
 ## Project Status
 
-This project is under active development following a phased approach:
+All core phases are complete:
 
 - [x] **Phase 0**: Infrastructure & Docker setup
-- [ ] **Phase 1**: Data types (Datum)
-- [ ] **Phase 2**: Wire protocol
-- [ ] **Phase 3**: Storage engine
-- [ ] **Phase 4**: B-Tree & CRUD
-- [ ] **Phase 5**: ReQL core
-- [ ] **Phase 6**: Secondary indexes & changefeeds
-- [ ] **Phase 7**: Admin API & system tables
-- [ ] **Phase 8**: RPC & clustering
-- [ ] **Phase 9**: Raft consensus
-- [ ] **Phase 10**: Consistency & replication
-- [ ] **Phase 11**: Advanced features (geo, JS, etc)
-- [ ] **Phase 12**: Dashboard & CLI tools
+- [x] **Phase 1**: Data types (Datum)
+- [x] **Phase 2**: Wire protocol
+- [x] **Phase 3**: Storage engine
+- [x] **Phase 4**: B-Tree & CRUD
+- [x] **Phase 5**: ReQL core
+- [x] **Phase 6**: Secondary indexes & changefeeds
+- [x] **Phase 7**: Admin API & system tables
+- [x] **Phase 8**: RPC & clustering
+- [x] **Phase 9**: Raft consensus
+- [x] **Phase 10**: Consistency & replication
+- [x] **Phase 11**: Advanced features (geo, JS, etc)
+- [x] **Phase 12**: Dashboard, drivers & CLI tools
 
 ## Contributing
 

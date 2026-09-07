@@ -61,13 +61,13 @@ func (o *ConnectOptions) defaults() {
 
 // Conn represents a connection to a GoThinkDB server.
 type Conn struct {
-	conn     net.Conn
-	opts     ConnectOptions
-	token    uint64
-	mu       sync.Mutex
-	pending  map[uint64]chan Response
-	reader   *bufio.Reader
-	closed   bool
+	conn    net.Conn
+	opts    ConnectOptions
+	token   uint64
+	mu      sync.Mutex
+	pending map[uint64]chan Response
+	reader  *bufio.Reader
+	closed  bool
 }
 
 // Connect creates a new connection to a GoThinkDB server.

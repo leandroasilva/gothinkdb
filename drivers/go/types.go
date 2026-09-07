@@ -1,5 +1,7 @@
 package gothinkdb
 
+import "encoding/json"
+
 // ResponseType represents the type of a server response.
 type ResponseType int
 
