@@ -91,7 +91,7 @@ func main() {
 	}()
 
 	// Start protocol server (ReQL)
-	handler := protocol.NewDefaultHandler()
+	handler := protocol.NewReQLHandler()
 	protocolServer := protocol.NewServer(cfg.DriverAddress, handler)
 	if err := protocolServer.Start(); err != nil {
 		slog.Error("failed to start protocol server", "error", err)
