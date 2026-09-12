@@ -299,6 +299,53 @@ All core phases are complete:
 - [x] **Phase 11**: Advanced features (geo, JS, etc)
 - [x] **Phase 12**: Dashboard, drivers & CLI tools
 
+## Installation
+
+### Docker
+
+```bash
+docker pull halklenson/gothinkdb:latest
+
+# Run standalone
+docker run -d --name gothinkdb \
+  -p 28015:28015 -p 8080:8080 -p 29015:29015 \
+  -v gothinkdb-data:/data/gothinkdb \
+  halklenson/gothinkdb:latest
+
+# Run cluster
+docker compose -f docker-compose.cluster.yml up -d
+```
+
+### Drivers
+
+| Language | Package | Install |
+|----------|---------|---------|
+| TypeScript/JavaScript | `gothinkdb-driver` | `npm install gothinkdb-driver` |
+| Rust | `gothinkdb` | `cargo add gothinkdb` |
+| Go | `drivers/go` | `go get github.com/leandroasilva/gothinkdb/drivers/go@latest` |
+
+### Binary Releases
+
+Download pre-built binaries from [GitHub Releases](https://github.com/leandroasilva/gothinkdb/releases):
+
+- `gothinkdb-linux-amd64` - Linux x86_64
+- `gothinkdb-linux-arm64` - Linux ARM64
+- `gothinkdb-darwin-amd64` - macOS Intel
+- `gothinkdb-darwin-arm64` - macOS Apple Silicon
+- `gothinkdb-windows-amd64.exe` - Windows x86_64
+
+## Automated Releases
+
+When a new release is published on GitHub, the following happens automatically:
+
+1. **Docker Image** - Built and pushed to `halklenson/gothinkdb:latest` and versioned tag
+2. **NPM Package** - TypeScript driver published to npmjs.com
+3. **Cargo Crate** - Rust driver published to crates.io
+4. **Go Binaries** - Pre-built binaries attached as release assets
+5. **Go Driver** - Tagged for `go get` installation
+
+See [.github/SECRETS.md](.github/SECRETS.md) for configuration details.
+
 ## Contributing
 
 This is a large-scale migration project. Contributions are welcome!
