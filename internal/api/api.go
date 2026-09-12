@@ -2,16 +2,51 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/leandroasilva/gothinkdb/internal/auth"
+	"github.com/leandroasilva/gothinkdb/internal/protocol"
 	"github.com/leandroasilva/gothinkdb/internal/reql"
 	"github.com/leandroasilva/gothinkdb/internal/rpc"
+	"github.com/leandroasilva/gothinkdb/pkg/datum"
 )
+
+// MetricsTracker tracks real-time server metrics
+type MetricsTracker struct {
+	queriesTotal      atomic.Int64
+	queriesPerSec     atomic.Int64
+	lastQueryTime     atomic.Int64 // unix nano
+	startTime         time.Time
+	logEntries        []LogEntry
+	logMu             sync.RWMutex
+	metricsHistory    []MetricsSnapshot
+	metricsMu         sync.RWMutex
+	maxLogEntries     int
+	maxMetricsHistory int
+}
+
+// LogEntry represents a server log entry
+type LogEntry struct {
+	ID        string `json:"id"`
+	Timestamp string `json:"timestamp"`
+	Level     string `json:"level"`
+	Message   string `json:"message"`
+	Server    string `json:"server"`
+}
+
+// MetricsSnapshot is a point-in-time metrics sample for charts
+type MetricsSnapshot struct {
+	Time    string `json:"time"`
+	Queries int64  `json:"queries"`
+	Latency int64  `json:"latency"`
+}
 
 // Server represents the API server
 type Server struct {
@@ -20,14 +55,24 @@ type Server struct {
 	clusterManager *ClusterManagerWrapper
 	wsHub          *WebSocketHub
 	auth           *auth.Service
+	protocolServer *protocol.Server
+	metrics        *MetricsTracker
 	mux            *http.ServeMux
 	mu             sync.RWMutex
 }
 
 // NewServer creates a new API server
-func NewServer(evaluator *reql.Evaluator, cluster *rpc.ClusterManager, authService *auth.Service, clusterManager *ClusterManagerWrapper) *Server {
+func NewServer(evaluator *reql.Evaluator, cluster *rpc.ClusterManager, authService *auth.Service, clusterManager *ClusterManagerWrapper, protocolServer *protocol.Server) *Server {
 	hub := NewWebSocketHub()
 	go hub.Run()
+
+	metrics := &MetricsTracker{
+		startTime:         time.Now(),
+		logEntries:        make([]LogEntry, 0, 500),
+		metricsHistory:    make([]MetricsSnapshot, 0, 60),
+		maxLogEntries:     500,
+		maxMetricsHistory: 60,
+	}
 
 	s := &Server{
 		evaluator:      evaluator,
@@ -35,16 +80,24 @@ func NewServer(evaluator *reql.Evaluator, cluster *rpc.ClusterManager, authServi
 		clusterManager: clusterManager,
 		wsHub:          hub,
 		auth:           authService,
+		protocolServer: protocolServer,
+		metrics:        metrics,
 		mux:            http.NewServeMux(),
 	}
 
 	s.setupRoutes()
+	s.startMetricsCollection()
 	return s
 }
 
 // GetWebSocketHub returns the WebSocket hub
 func (s *Server) GetWebSocketHub() *WebSocketHub {
 	return s.wsHub
+}
+
+// SetProtocolServer sets the protocol server reference for metrics
+func (s *Server) SetProtocolServer(ps *protocol.Server) {
+	s.protocolServer = ps
 }
 
 // setupRoutes sets up API routes
@@ -88,6 +141,9 @@ func (s *Server) setupRoutes() {
 
 	// Logs (auth required)
 	s.mux.HandleFunc("/api/logs", s.authMiddleware(s.handleLogs))
+
+	// Metrics (auth required)
+	s.mux.HandleFunc("/api/metrics", s.authMiddleware(s.handleMetrics))
 }
 
 // ServeHTTP implements http.Handler
@@ -95,16 +151,121 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
+// startMetricsCollection starts background goroutines for metrics collection
+func (s *Server) startMetricsCollection() {
+	// Add initial log entries
+	s.addLogEntry("info", "GoThinkDB server started successfully")
+	s.addLogEntry("info", fmt.Sprintf("HTTP admin server listening on :8080"))
+	s.addLogEntry("info", fmt.Sprintf("ReQL protocol server listening on :28015"))
+
+	// Start metrics sampling every second
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		var lastQueries int64
+		for range ticker.C {
+			// Include protocol server queries
+			var protocolQueries int64
+			if s.protocolServer != nil {
+				protocolQueries = s.protocolServer.QueryCount()
+			}
+			current := s.metrics.queriesTotal.Load() + protocolQueries
+			qps := current - lastQueries
+			lastQueries = current
+			s.metrics.queriesPerSec.Store(qps)
+
+			// Calculate latency estimate (time since last query)
+			var latency int64 = 0
+			lastQ := s.metrics.lastQueryTime.Load()
+			if lastQ > 0 {
+				elapsed := time.Since(time.Unix(0, lastQ))
+				latency = elapsed.Milliseconds()
+			}
+
+			snapshot := MetricsSnapshot{
+				Time:    time.Now().Format("15:04:05"),
+				Queries: current,
+				Latency: latency,
+			}
+
+			s.metrics.metricsMu.Lock()
+			s.metrics.metricsHistory = append(s.metrics.metricsHistory, snapshot)
+			if len(s.metrics.metricsHistory) > s.metrics.maxMetricsHistory {
+				s.metrics.metricsHistory = s.metrics.metricsHistory[1:]
+			}
+			s.metrics.metricsMu.Unlock()
+		}
+	}()
+}
+
+// addLogEntry adds a log entry to the in-memory buffer
+func (s *Server) addLogEntry(level, message string) {
+	s.metrics.logMu.Lock()
+	defer s.metrics.logMu.Unlock()
+
+	entry := LogEntry{
+		ID:        fmt.Sprintf("%d", len(s.metrics.logEntries)+1),
+		Timestamp: time.Now().Format(time.RFC3339),
+		Level:     level,
+		Message:   message,
+		Server:    "gothinkdb",
+	}
+	s.metrics.logEntries = append(s.metrics.logEntries, entry)
+
+	// Trim to max entries
+	if len(s.metrics.logEntries) > s.metrics.maxLogEntries {
+		s.metrics.logEntries = s.metrics.logEntries[len(s.metrics.logEntries)-s.metrics.maxLogEntries:]
+	}
+}
+
+// RecordQuery records a query execution for metrics
+func (s *Server) RecordQuery() {
+	s.metrics.queriesTotal.Add(1)
+	s.metrics.lastQueryTime.Store(time.Now().UnixNano())
+}
+
+// RecordLog records a log entry from external sources
+func (s *Server) RecordLog(level, message string) {
+	s.addLogEntry(level, message)
+}
+
 // handleHealth handles health check requests
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	slog.Debug("health check request")
+	uptime := time.Since(s.metrics.startTime).Round(time.Second).String()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status": "healthy",
 		"server": "gothinkdb",
+		"uptime": uptime,
 	})
 }
 
-// handleClusterStatus handles cluster status requests
+// handleMetrics handles metrics requests for chart data
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	s.metrics.metricsMu.RLock()
+	history := make([]MetricsSnapshot, len(s.metrics.metricsHistory))
+	copy(history, s.metrics.metricsHistory)
+	s.metrics.metricsMu.RUnlock()
+
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"history":         history,
+		"queries_total":   s.metrics.queriesTotal.Load(),
+		"queries_per_sec": s.metrics.queriesPerSec.Load(),
+		"memory_used_mb":  memStats.Alloc / 1024 / 1024,
+		"connections":     s.getConnectionCount(),
+	})
+}
+
+// getConnectionCount returns the number of active protocol connections
+func (s *Server) getConnectionCount() int64 {
+	if s.protocolServer != nil {
+		return s.protocolServer.ConnectionCount()
+	}
+	return 0
+}
 func (s *Server) handleClusterStatus(w http.ResponseWriter, r *http.Request) {
 	if s.cluster == nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -158,6 +319,7 @@ func (s *Server) handleDatabases(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
 		}
+		s.RecordLog("info", fmt.Sprintf("Database '%s' created by user '%s'", req.Name, user.Username))
 		writeJSON(w, http.StatusCreated, map[string]string{"status": "created"})
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -202,6 +364,12 @@ func (s *Server) handleDatabase(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 			return
 		}
+		user, _ := auth.UserFromContext(r.Context())
+		username := "unknown"
+		if user != nil {
+			username = user.Username
+		}
+		s.RecordLog("info", fmt.Sprintf("Database '%s' dropped by user '%s'", name, username))
 		writeJSON(w, http.StatusOK, map[string]string{"status": "dropped"})
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -281,12 +449,24 @@ func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
 		}
+		user, _ := auth.UserFromContext(r.Context())
+		username := "unknown"
+		if user != nil {
+			username = user.Username
+		}
+		s.RecordLog("info", fmt.Sprintf("Table '%s' created in database '%s' by user '%s'", name, dbName, username))
 		writeJSON(w, http.StatusCreated, map[string]string{"status": "created"})
 	case http.MethodDelete:
 		if err := s.evaluator.GetAdmin().DropTable(dbName, name); err != nil {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 			return
 		}
+		user, _ := auth.UserFromContext(r.Context())
+		username := "unknown"
+		if user != nil {
+			username = user.Username
+		}
+		s.RecordLog("info", fmt.Sprintf("Table '%s' dropped from database '%s' by user '%s'", name, dbName, username))
 		writeJSON(w, http.StatusOK, map[string]string{"status": "dropped"})
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -308,74 +488,59 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Execute query
-	// This would integrate with the ReQL evaluator
+	// Record query for metrics
+	s.RecordQuery()
+
+	// Execute query using the ReQL evaluator
+	result, err := s.evaluator.Evaluate(r.Context(), req.Query)
+	if err != nil {
+		slog.Error("query execution failed", "error", err)
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status": "error",
+			"result": nil,
+			"error":  err.Error(),
+		})
+		return
+	}
+
+	// Convert datum result to interface{}
+	responseData := datumToInterface(result)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status": "success",
-		"result": nil,
+		"result": responseData,
 	})
 }
 
 // handleServerInfo handles server info requests
 func (s *Server) handleServerInfo(w http.ResponseWriter, r *http.Request) {
+	uptime := time.Since(s.metrics.startTime).Round(time.Second).String()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"version": "1.0.0",
+		"version": "0.1.0",
 		"server":  "gothinkdb",
 		"status":  "running",
-		"uptime":  "N/A",
+		"uptime":  uptime,
 	})
 }
 
 // handleServerStats handles server stats requests
 func (s *Server) handleServerStats(w http.ResponseWriter, r *http.Request) {
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"queries_total":      0,
-		"queries_per_second": 0,
-		"connections":        0,
-		"memory_used":        0,
+		"queries_total":      s.metrics.queriesTotal.Load(),
+		"queries_per_second": s.metrics.queriesPerSec.Load(),
+		"connections":        s.getConnectionCount(),
+		"memory_used":        memStats.Alloc / 1024 / 1024,
 	})
 }
 
 // handleLogs handles log requests
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
-	// Return sample logs for now; will be connected to real log system
-	logs := []map[string]interface{}{
-		{
-			"id":        "1",
-			"timestamp": time.Now().Add(-5 * time.Minute).Format(time.RFC3339),
-			"level":     "info",
-			"message":   "GoThinkDB server started successfully",
-			"server":    "gothinkdb",
-		},
-		{
-			"id":        "2",
-			"timestamp": time.Now().Add(-4 * time.Minute).Format(time.RFC3339),
-			"level":     "info",
-			"message":   "HTTP admin server listening on :8080",
-			"server":    "gothinkdb",
-		},
-		{
-			"id":        "3",
-			"timestamp": time.Now().Add(-3 * time.Minute).Format(time.RFC3339),
-			"level":     "info",
-			"message":   "ReQL protocol server listening on :28015",
-			"server":    "gothinkdb",
-		},
-		{
-			"id":        "4",
-			"timestamp": time.Now().Add(-2 * time.Minute).Format(time.RFC3339),
-			"level":     "debug",
-			"message":   "Health check endpoint responding",
-			"server":    "gothinkdb",
-		},
-		{
-			"id":        "5",
-			"timestamp": time.Now().Add(-1 * time.Minute).Format(time.RFC3339),
-			"level":     "info",
-			"message":   "Dashboard served at /",
-			"server":    "gothinkdb",
-		},
-	}
+	s.metrics.logMu.RLock()
+	logs := make([]LogEntry, len(s.metrics.logEntries))
+	copy(logs, s.metrics.logEntries)
+	s.metrics.logMu.RUnlock()
 	writeJSON(w, http.StatusOK, logs)
 }
 
@@ -405,5 +570,46 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		slog.Error("failed to encode JSON response", "error", err)
+	}
+}
+
+// datumToInterface converts a datum.Datum to interface{} for JSON serialization
+func datumToInterface(d datum.Datum) interface{} {
+	switch d.Type() {
+	case datum.Null:
+		return nil
+	case datum.Bool:
+		return d.Bool()
+	case datum.Num:
+		return d.Num()
+	case datum.Str:
+		return d.Str()
+	case datum.Array:
+		arr := d.Array()
+		result := make([]interface{}, len(arr))
+		for i, item := range arr {
+			result[i] = datumToInterface(item)
+		}
+		return result
+	case datum.Object:
+		obj := d.Object()
+		result := make(map[string]interface{})
+		for _, key := range obj.Keys() {
+			val, _ := obj.Get(key)
+			result[key] = datumToInterface(val)
+		}
+		return result
+	case datum.Binary:
+		return d.Binary()
+	case datum.Time:
+		return d.Time()
+	case datum.Geometry:
+		return d.Geometry()
+	case datum.MinVal:
+		return map[string]interface{}{"$reql_type$": "MINVAL"}
+	case datum.MaxVal:
+		return map[string]interface{}{"$reql_type$": "MAXVAL"}
+	default:
+		return nil
 	}
 }

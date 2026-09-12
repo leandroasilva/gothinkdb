@@ -20,6 +20,7 @@ type Server struct {
 	quit          chan struct{}
 	wg            sync.WaitGroup
 	connCount     atomic.Int64
+	queryCount    atomic.Int64
 	serverVersion string
 }
 
@@ -304,6 +305,7 @@ func (s *Server) queryLoop(conn *Connection) {
 		// Handle query
 		switch query.Type {
 		case QueryStart:
+			s.queryCount.Add(1)
 			ctx, cancel := context.WithCancel(context.Background())
 
 			queriesMu.Lock()
@@ -403,4 +405,14 @@ func (s *Server) sendError(conn *Connection, token int64, errType int64, message
 // ConnectionCount returns the number of active connections
 func (s *Server) ConnectionCount() int64 {
 	return s.connCount.Load()
+}
+
+// QueryCount returns the total number of queries processed
+func (s *Server) QueryCount() int64 {
+	return s.queryCount.Load()
+}
+
+// IncrementQueryCount increments the query counter
+func (s *Server) IncrementQueryCount() {
+	s.queryCount.Add(1)
 }

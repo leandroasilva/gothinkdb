@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -32,9 +33,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	token, user, err := s.auth.Login(req.Username, req.Password)
 	if err != nil {
+		s.RecordLog("warn", fmt.Sprintf("Failed login attempt for user '%s'", req.Username))
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}
+
+	s.RecordLog("info", fmt.Sprintf("User '%s' logged in successfully", user.Username))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"token": token,

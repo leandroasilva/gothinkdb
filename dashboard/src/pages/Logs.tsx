@@ -31,7 +31,11 @@ export function LogsPage() {
 
     const fetchLogs = async () => {
       try {
-        const res = await fetch('/api/logs')
+        const token = localStorage.getItem('auth_token')
+        const headers: Record<string, string> = {}
+        if (token) headers['Authorization'] = `Bearer ${token}`
+
+        const res = await fetch('/api/logs', { headers })
         if (res.ok) {
           const data = await res.json()
           if (Array.isArray(data)) {

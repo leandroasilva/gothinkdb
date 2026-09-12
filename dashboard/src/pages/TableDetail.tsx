@@ -8,7 +8,10 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 async function fetchJSON(url: string) {
-  const res = await fetch(url)
+  const token = localStorage.getItem('auth_token')
+  const headers: Record<string, string> = {}
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  const res = await fetch(url, { headers })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }

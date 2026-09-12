@@ -97,8 +97,8 @@ func main() {
 		slog.Info("default admin user created", "username", "admin", "password", "admin")
 	}
 
-	// Create API server with all routes
-	apiServer := api.NewServer(evaluator, cluster, authService, clusterManager)
+	// Create API server with all routes (protocol server will be set after creation)
+	apiServer := api.NewServer(evaluator, cluster, authService, clusterManager, nil)
 
 	// Setup dashboard file server from embedded FS with SPA fallback
 	dashboardSub, err := fs.Sub(dashboardFS, "dashboard")
@@ -166,6 +166,9 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("ReQL protocol server started successfully", "address", cfg.DriverAddress)
+
+	// Set protocol server reference in API server for metrics
+	apiServer.SetProtocolServer(protocolServer)
 
 	slog.Info("GoThinkDB server started successfully")
 	fmt.Printf("\nGoThinkDB is ready!\n")
