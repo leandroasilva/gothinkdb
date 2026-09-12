@@ -24,9 +24,12 @@ echo ""
 
 # Check if logged in
 if ! docker info 2>/dev/null | grep -q "Username"; then
-    echo "ERROR: Not logged in to DockerHub"
-    echo "Please run: docker login"
-    exit 1
+    # Try alternative check
+    if ! docker info 2>&1 | grep -qi "logged in\|username\|auth"; then
+        echo "WARNING: Could not verify DockerHub login"
+        echo "If push fails, please run: docker login"
+        echo ""
+    fi
 fi
 
 # Build the image
