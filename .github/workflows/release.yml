@@ -167,6 +167,20 @@ jobs:
           go-version: '1.23'
           cache: true
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build dashboard
+        run: |
+          cd dashboard
+          npm ci
+          npm run build
+          cd ..
+          mkdir -p cmd/gothinkdb/dashboard
+          cp -r dashboard/dist/* cmd/gothinkdb/dashboard/
+
       - name: Build binary
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
