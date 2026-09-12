@@ -15,7 +15,27 @@ GoThinkDB is a complete reimplementation of RethinkDB in Go, providing full API 
 
 ## Quick Start
 
-### Using Docker (Recommended)
+### Install Native (Recommended for Production)
+
+**macOS & Linux:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/leandroasilva/gothinkdb/main/scripts/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+iwr -useb https://raw.githubusercontent.com/leandroasilva/gothinkdb/main/scripts/install.ps1 | iex
+```
+
+**Start GoThinkDB:**
+```bash
+gothinkdb -data ~/.gothinkdb
+```
+
+**Access Dashboard:** http://localhost:8080  
+**Default Credentials:** admin / admin
+
+### Using Docker
 
 ```bash
 # Start single node
