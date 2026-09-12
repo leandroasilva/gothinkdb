@@ -11,18 +11,18 @@ import (
 
 // RemoveManager handles graceful node removal
 type RemoveManager struct {
-	joinManager    *JoinManager
+	joinManager     *JoinManager
 	transferManager *TransferManager
-	operations     map[string]*RemoveOperation // nodeID -> operation
-	mu             sync.RWMutex
+	operations      map[string]*RemoveOperation // nodeID -> operation
+	mu              sync.RWMutex
 }
 
 // NewRemoveManager creates a new remove manager
 func NewRemoveManager(joinManager *JoinManager, transferManager *TransferManager) *RemoveManager {
 	return &RemoveManager{
-		joinManager:    joinManager,
+		joinManager:     joinManager,
 		transferManager: transferManager,
-		operations:     make(map[string]*RemoveOperation),
+		operations:      make(map[string]*RemoveOperation),
 	}
 }
 
@@ -72,7 +72,7 @@ func (rm *RemoveManager) StartRemoval(nodeID string) error {
 func (rm *RemoveManager) executeRemoval(nodeID string) {
 	// Step 1: Identify data to transfer
 	rm.updateOperationStatus(nodeID, "identifying_data")
-	
+
 	// Get member info
 	member, exists := rm.joinManager.GetMember(nodeID)
 	if !exists {
@@ -84,7 +84,7 @@ func (rm *RemoveManager) executeRemoval(nodeID string) {
 	// In a real implementation, this would query the node for its data
 	// For now, we simulate with a placeholder transfer
 	transfers := rm.identifyTransfers(nodeID, member)
-	
+
 	rm.mu.Lock()
 	if op, exists := rm.operations[nodeID]; exists {
 		op.Transfers = transfers
@@ -130,7 +130,7 @@ func (rm *RemoveManager) identifyTransfers(nodeID string, member *NodeInfo) []*T
 	// 1. Query the node for its databases and tables
 	// 2. Check which data has no replicas
 	// 3. Create transfer tasks for unique data
-	
+
 	// For now, return empty list (no data to transfer in this simulation)
 	return make([]*TransferTask, 0)
 }

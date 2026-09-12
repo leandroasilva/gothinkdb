@@ -7,10 +7,10 @@ import (
 
 // Store manages users and permissions
 type Store struct {
-	users       map[string]*User      // userID -> User
-	usersByName map[string]string     // username -> userID
+	users       map[string]*User       // userID -> User
+	usersByName map[string]string      // username -> userID
 	permissions map[string]*Permission // permissionKey -> Permission
-	userPerms   map[string][]string   // userID -> []permissionKey
+	userPerms   map[string][]string    // userID -> []permissionKey
 	mu          sync.RWMutex
 }
 

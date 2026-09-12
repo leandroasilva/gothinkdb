@@ -25,11 +25,11 @@ type JoinToken struct {
 
 // TokenManager manages join tokens
 type TokenManager struct {
-	tokens    map[string]*JoinToken // token string -> JoinToken
+	tokens     map[string]*JoinToken // token string -> JoinToken
 	tokensByID map[string]*JoinToken // token ID -> JoinToken
-	clusterID string
-	secret    []byte
-	mu        sync.RWMutex
+	clusterID  string
+	secret     []byte
+	mu         sync.RWMutex
 }
 
 // NewTokenManager creates a new token manager
@@ -49,15 +49,15 @@ func (tm *TokenManager) GenerateToken(createdBy string, expiresIn time.Duration)
 
 	// Generate unique ID and token
 	id := uuid.New().String()
-	
+
 	// Create token payload
 	payload := fmt.Sprintf("%s:%s:%d", id, tm.clusterID, time.Now().UnixNano())
-	
+
 	// Sign the payload
 	mac := hmac.New(sha256.New, tm.secret)
 	mac.Write([]byte(payload))
 	signature := hex.EncodeToString(mac.Sum(nil))
-	
+
 	// Final token is payload + signature
 	token := fmt.Sprintf("%s.%s", payload, signature)
 

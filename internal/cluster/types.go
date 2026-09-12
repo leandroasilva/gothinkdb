@@ -6,26 +6,26 @@ import "time"
 type NodeStatus string
 
 const (
-	NodeStatusActive    NodeStatus = "active"
-	NodeStatusDraining  NodeStatus = "draining"
-	NodeStatusOffline   NodeStatus = "offline"
-	NodeStatusJoining   NodeStatus = "joining"
-	NodeStatusLeaving   NodeStatus = "leaving"
+	NodeStatusActive   NodeStatus = "active"
+	NodeStatusDraining NodeStatus = "draining"
+	NodeStatusOffline  NodeStatus = "offline"
+	NodeStatusJoining  NodeStatus = "joining"
+	NodeStatusLeaving  NodeStatus = "leaving"
 )
 
 // NodeInfo represents information about a cluster node
 type NodeInfo struct {
-	NodeID       string     `json:"node_id"`
-	Address      string     `json:"address"`
-	ClusterPort  int        `json:"cluster_port"`
-	HTTPPort     int        `json:"http_port"`
-	DriverPort   int        `json:"driver_port"`
-	Status       NodeStatus `json:"status"`
-	IsLeader     bool       `json:"is_leader"`
-	JoinedAt     time.Time  `json:"joined_at"`
-	LastSeen     time.Time  `json:"last_seen"`
-	DataSizeMB   int64      `json:"data_size_mb"`
-	TablesCount  int        `json:"tables_count"`
+	NodeID      string     `json:"node_id"`
+	Address     string     `json:"address"`
+	ClusterPort int        `json:"cluster_port"`
+	HTTPPort    int        `json:"http_port"`
+	DriverPort  int        `json:"driver_port"`
+	Status      NodeStatus `json:"status"`
+	IsLeader    bool       `json:"is_leader"`
+	JoinedAt    time.Time  `json:"joined_at"`
+	LastSeen    time.Time  `json:"last_seen"`
+	DataSizeMB  int64      `json:"data_size_mb"`
+	TablesCount int        `json:"tables_count"`
 }
 
 // TransferStatus represents the status of a data transfer
@@ -54,12 +54,12 @@ type TransferTask struct {
 
 // RemoveOperation represents a node removal operation
 type RemoveOperation struct {
-	NodeID       string          `json:"node_id"`
-	Status       string          `json:"status"` // draining, transferring, shutting_down, completed, failed
-	Transfers    []*TransferTask `json:"transfers"`
-	StartedAt    time.Time       `json:"started_at"`
-	CompletedAt  *time.Time      `json:"completed_at,omitempty"`
-	Error        string          `json:"error,omitempty"`
+	NodeID      string          `json:"node_id"`
+	Status      string          `json:"status"` // draining, transferring, shutting_down, completed, failed
+	Transfers   []*TransferTask `json:"transfers"`
+	StartedAt   time.Time       `json:"started_at"`
+	CompletedAt *time.Time      `json:"completed_at,omitempty"`
+	Error       string          `json:"error,omitempty"`
 }
 
 // JoinRequest represents a request to join the cluster
@@ -74,10 +74,10 @@ type JoinRequest struct {
 
 // JoinResponse represents the response to a join request
 type JoinResponse struct {
-	Success    bool        `json:"success"`
-	NodeID     string      `json:"node_id,omitempty"`
-	ClusterID  string      `json:"cluster_id,omitempty"`
-	LeaderID   string      `json:"leader_id,omitempty"`
-	Members    []*NodeInfo `json:"members,omitempty"`
-	Error      string      `json:"error,omitempty"`
+	Success   bool        `json:"success"`
+	NodeID    string      `json:"node_id,omitempty"`
+	ClusterID string      `json:"cluster_id,omitempty"`
+	LeaderID  string      `json:"leader_id,omitempty"`
+	Members   []*NodeInfo `json:"members,omitempty"`
+	Error     string      `json:"error,omitempty"`
 }

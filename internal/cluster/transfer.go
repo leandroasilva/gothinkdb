@@ -50,16 +50,16 @@ func (tm *TransferManager) executeTransfer(task *TransferTask) {
 	// 2. Stream data blocks from source to target
 	// 3. Verify data integrity
 	// 4. Update progress
-	
+
 	// For now, simulate transfer with progress updates
 	steps := 10
 	for i := 1; i <= steps; i++ {
 		time.Sleep(1 * time.Second) // Simulate work
-		
+
 		tm.mu.Lock()
 		task.Progress = (i * 100) / steps
 		tm.mu.Unlock()
-		
+
 		slog.Debug("transfer progress",
 			"transfer_id", task.ID,
 			"progress", task.Progress,

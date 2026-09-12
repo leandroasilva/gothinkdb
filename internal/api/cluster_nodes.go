@@ -75,7 +75,7 @@ func (s *Server) handleClusterNode(w http.ResponseWriter, r *http.Request) {
 	// Extract node ID and action from path: /api/cluster/nodes/{id}/{action}
 	path := strings.TrimPrefix(r.URL.Path, "/api/cluster/nodes/")
 	parts := strings.Split(path, "/")
-	
+
 	if len(parts) == 0 || parts[0] == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "node ID required"})
 		return

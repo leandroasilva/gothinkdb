@@ -23,10 +23,10 @@ func NewRebalancer(joinManager *JoinManager, transferManager *TransferManager) *
 
 // NodeLoad represents the load on a node
 type NodeLoad struct {
-	NodeID     string
-	DataSizeMB int64
+	NodeID      string
+	DataSizeMB  int64
 	TablesCount int
-	Score      float64 // Calculated load score
+	Score       float64 // Calculated load score
 }
 
 // RebalancePlan represents a plan for rebalancing data
@@ -78,7 +78,7 @@ func (r *Rebalancer) CalculateRebalancePlan() *RebalancePlan {
 	// 1. Identify tables/databases on overloaded nodes
 	// 2. Select targets on underloaded nodes
 	// 3. Create transfer tasks
-	
+
 	// For now, return empty plan (no rebalancing needed in simulation)
 	slog.Debug("rebalance plan calculated",
 		"nodes", len(loads),
@@ -111,7 +111,7 @@ func (r *Rebalancer) calculateLoadScores(loads []*NodeLoad) {
 		if avgData > 0 {
 			dataDeviation = (float64(l.DataSizeMB) - avgData) / avgData
 		}
-		
+
 		tablesDeviation := 0.0
 		if avgTables > 0 {
 			tablesDeviation = (float64(l.TablesCount) - avgTables) / avgTables
@@ -152,7 +152,7 @@ func (r *Rebalancer) GetClusterBalance() map[string]interface{} {
 	defer r.mu.RUnlock()
 
 	members := r.joinManager.GetMembers()
-	
+
 	var totalData int64
 	var totalTables int
 	activeNodes := 0
@@ -173,11 +173,11 @@ func (r *Rebalancer) GetClusterBalance() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"total_nodes":    len(members),
-		"active_nodes":   activeNodes,
-		"total_data_mb":  totalData,
-		"total_tables":   totalTables,
-		"avg_data_mb":    avgData,
-		"avg_tables":     avgTables,
+		"total_nodes":   len(members),
+		"active_nodes":  activeNodes,
+		"total_data_mb": totalData,
+		"total_tables":  totalTables,
+		"avg_data_mb":   avgData,
+		"avg_tables":    avgTables,
 	}
 }

@@ -161,7 +161,7 @@ func (jm *JoinManager) UpdateMemberStatus(nodeID string, status NodeStatus) erro
 // SendJoinRequest sends a join request to an existing cluster node
 func SendJoinRequest(leaderAddress string, req *JoinRequest) (*JoinResponse, error) {
 	url := fmt.Sprintf("http://%s/api/cluster/join", leaderAddress)
-	
+
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
