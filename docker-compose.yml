@@ -1,14 +1,17 @@
 # Docker Compose for GoThinkDB
-# Single node configuration
+# Single node (standalone) configuration
+#
+# Usage:
+#   docker compose up -d
+#
+# Or with custom image:
+#   DOCKERHUB_USER=halklenson docker compose up -d
 
 version: '3.8'
 
 services:
   gothinkdb:
-    image: gothinkdb:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${DOCKERHUB_USER:-halklenson}/gothinkdb:${DOCKERHUB_TAG:-latest}
     container_name: gothinkdb
     ports:
       - "28015:28015"  # Driver protocol

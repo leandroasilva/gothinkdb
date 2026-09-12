@@ -4,7 +4,8 @@
 .PHONY: help build test docker-build docker-up docker-down docker-logs clean deps fmt lint \
 	dashboard-build dashboard-dev dashboard-install \
 	driver-ts-build driver-go-build driver-rust-build driver-test \
-	test-all test-single test-cluster test-dashboard test-drivers
+	test-all test-single test-cluster test-dashboard test-drivers \
+	dockerhub-build dockerhub-push dockerhub-build-push
 
 # Default target
 help:
@@ -37,6 +38,11 @@ help:
 	@echo "  test-cluster          - Test cluster Docker"
 	@echo "  test-dashboard        - Test dashboard endpoints"
 	@echo "  test-drivers          - Test drivers against running server"
+	@echo ""
+	@echo "=== DockerHub ==="
+	@echo "  dockerhub-build       - Build image for DockerHub"
+	@echo "  dockerhub-push        - Push image to DockerHub"
+	@echo "  dockerhub-build-push  - Build and push to DockerHub"
 	@echo ""
 	@echo "=== Development ==="
 	@echo "  build                 - Build Go binary locally"
@@ -252,6 +258,30 @@ clean:
 	docker compose -f docker-compose.cluster.yml down -v 2>/dev/null || true
 	docker rmi gothinkdb:latest 2>/dev/null || true
 	@echo "Clean complete"
+
+# =====================
+# DockerHub
+# =====================
+
+DOCKERHUB_USER ?= halklenson
+DOCKERHUB_IMAGE = $(DOCKERHUB_USER)/gothinkdb
+DOCKERHUB_TAG ?= latest
+
+dockerhub-build:
+	@echo "Building DockerHub image: $(DOCKERHUB_IMAGE):$(DOCKERHUB_TAG)..."
+	docker build -t $(DOCKERHUB_IMAGE):$(DOCKERHUB_TAG) .
+	@echo ""
+	@echo "Image built: $(DOCKERHUB_IMAGE):$(DOCKERHUB_TAG)"
+
+dockerhub-push:
+	@echo "Pushing $(DOCKERHUB_IMAGE):$(DOCKERHUB_TAG) to DockerHub..."
+	docker push $(DOCKERHUB_IMAGE):$(DOCKERHUB_TAG)
+	@echo ""
+	@echo "Pushed: $(DOCKERHUB_IMAGE):$(DOCKERHUB_TAG)"
+
+dockerhub-build-push: dockerhub-build dockerhub-push
+	@echo ""
+	@echo "Done! Pull with: docker pull $(DOCKERHUB_IMAGE):$(DOCKERHUB_TAG)"
 
 # =====================
 # Go Development
