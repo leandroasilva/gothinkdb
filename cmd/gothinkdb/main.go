@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/leandroasilva/gothinkdb/internal/api"
+	"github.com/leandroasilva/gothinkdb/internal/auth"
 	"github.com/leandroasilva/gothinkdb/internal/config"
 	"github.com/leandroasilva/gothinkdb/internal/protocol"
 	"github.com/leandroasilva/gothinkdb/internal/reql"
@@ -80,8 +81,24 @@ func main() {
 	evaluator := reql.NewEvaluator()
 	cluster := rpc.NewClusterManager(cfg.ServerName)
 
+	// Create auth service
+	authStore := auth.NewStore()
+	authService := auth.NewService(authStore)
+
+	// Create cluster manager wrapper (for node management)
+	clusterID := cluster.GetClusterID()
+	clusterManager := api.NewClusterManagerWrapper(clusterID, []byte("gothinkdb-cluster-secret"))
+
+	// Create default admin user
+	if admin, err := authStore.CreateDefaultAdmin(); err != nil {
+		slog.Error("failed to create default admin", "error", err)
+		os.Exit(1)
+	} else if admin != nil {
+		slog.Info("default admin user created", "username", "admin", "password", "admin")
+	}
+
 	// Create API server with all routes
-	apiServer := api.NewServer(evaluator, cluster)
+	apiServer := api.NewServer(evaluator, cluster, authService, clusterManager)
 
 	// Setup dashboard file server from embedded FS with SPA fallback
 	dashboardSub, err := fs.Sub(dashboardFS, "dashboard")
