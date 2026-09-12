@@ -92,7 +92,12 @@ jobs:
         run: npm run build
 
       - name: Publish to NPM
-        run: npm publish --access public
+        run: |
+          if [ -n "${{ secrets.NPM_OTP }}" ]; then
+            npm publish --access public --otp=${{ secrets.NPM_OTP }}
+          else
+            npm publish --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
