@@ -1,8 +1,8 @@
 import * as net from 'net';
 import { ConnectionOptions, Response, ResponseType } from './types';
 
-const V1_MAGIC = 0x34c2bdc3;
 const V0_4_MAGIC = 0x400c2d20;
+const JSON_PROTOCOL = 0x7e6970c7;
 
 /**
  * Connection to a GoThinkDB server
@@ -11,12 +11,9 @@ export class Connection {
   private socket: net.Socket | null = null;
   private options: Required<ConnectionOptions>;
   private tokenCounter = 0;
-  private pendingQueries = new Map<number, {
-    resolve: (value: Response) => void;
-    reject: (error: Error) => void;
-  }>();
   private buffer = Buffer.alloc(0);
   private connected = false;
+  private queryMutex: Promise<void> = Promise.resolve();
 
   constructor(options: ConnectionOptions = {}) {
     this.options = {
@@ -36,7 +33,6 @@ export class Connection {
     return new Promise((resolve, reject) => {
       this.socket = new net.Socket();
 
-      this.socket.on('data', (data) => this.handleData(data));
       this.socket.on('error', (err) => {
         this.connected = false;
         reject(err);
@@ -65,24 +61,26 @@ export class Connection {
   }
 
   /**
-   * Perform V1.0 handshake (SCRAM-SHA-256 simplified)
+   * Perform V0.4 handshake (plaintext auth)
    */
   private async handshake(): Promise<void> {
     return new Promise((resolve, reject) => {
-      // Send magic number (V1.0)
+      // Send V0.4 magic
       const magic = Buffer.alloc(4);
-      magic.writeUInt32LE(V1_MAGIC, 0);
+      magic.writeUInt32LE(V0_4_MAGIC, 0);
       this.socket!.write(magic);
 
-      // Send auth JSON (null-terminated)
-      const auth = JSON.stringify({
-        protocol_version: 1,
-        authentication_method: 'SCRAM-SHA-256',
-        authentication: '',
-      }) + '\0';
-      this.socket!.write(auth);
+      // Send auth key size (0)
+      const authKeySize = Buffer.alloc(4);
+      authKeySize.writeUInt32LE(0, 0);
+      this.socket!.write(authKeySize);
 
-      // Wait for response
+      // Send JSON wire protocol
+      const proto = Buffer.alloc(4);
+      proto.writeUInt32LE(JSON_PROTOCOL, 0);
+      this.socket!.write(proto);
+
+      // Wait for SUCCESS\0 response
       const onData = (data: Buffer) => {
         this.buffer = Buffer.concat([this.buffer, data]);
         const nullIdx = this.buffer.indexOf(0);
@@ -91,40 +89,10 @@ export class Connection {
           this.buffer = this.buffer.subarray(nullIdx + 1);
           this.socket!.off('data', onData);
 
-          try {
-            const parsed = JSON.parse(response);
-            if (parsed.success || parsed.authentication === 'SUCCESS') {
-              // Send wire protocol selection
-              const protocol = Buffer.alloc(4);
-              protocol.writeUInt32LE(0x271ffc41, 0); // JSON protocol
-              this.socket!.write(protocol);
-
-              // Wait for SUCCESS response
-              const onProtoData = (data: Buffer) => {
-                this.buffer = Buffer.concat([this.buffer, data]);
-                const idx = this.buffer.indexOf(0);
-                if (idx >= 0) {
-                  const protoResponse = this.buffer.subarray(0, idx).toString();
-                  this.buffer = this.buffer.subarray(idx + 1);
-                  this.socket!.off('data', onProtoData);
-
-                  if (protoResponse === 'SUCCESS') {
-                    resolve();
-                  } else {
-                    reject(new Error(`Protocol handshake failed: ${protoResponse}`));
-                  }
-                }
-              };
-              this.socket!.on('data', onProtoData);
-            } else if (response === 'SUCCESS') {
-              resolve();
-            } else {
-              // Fallback: try legacy handshake
-              this.legacyHandshake().then(resolve).catch(reject);
-            }
-          } catch {
-            // If parsing fails, try legacy
-            this.legacyHandshake().then(resolve).catch(reject);
+          if (response === 'SUCCESS') {
+            resolve();
+          } else {
+            reject(new Error(`Handshake failed: ${response}`));
           }
         }
       };
@@ -133,84 +101,81 @@ export class Connection {
   }
 
   /**
-   * Legacy V0.4 handshake
+   * Send a query to the server (synchronous: send and read response)
    */
-  private async legacyHandshake(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      // Already connected, just mark as ready
-      resolve();
-    });
-  }
-
-  /**
-   * Send a query to the server
-   */
-  async query<T = unknown>(term: unknown, options?: { db?: string }): Promise<Response<T>> {
+  async query<T = unknown>(term: unknown, _options?: { db?: string }): Promise<Response<T>> {
     if (!this.connected || !this.socket) {
       throw new Error('Not connected');
     }
 
     const token = ++this.tokenCounter;
-    const query = JSON.stringify([1, term]) + '\0';
+    const queryObj = JSON.stringify({ token, type: 1, query: term });
+    const queryBuf = Buffer.from(queryObj);
 
-    // Send token (8 bytes) + query length (4 bytes) + query
-    const tokenBuf = Buffer.alloc(12);
-    tokenBuf.writeBigUInt64LE(BigInt(token), 0);
-    tokenBuf.writeUInt32LE(Buffer.byteLength(query), 8);
+    // Serialize queries using mutex (one at a time)
+    const prev = this.queryMutex;
+    let releaseMutex: () => void;
+    this.queryMutex = new Promise<void>((r) => { releaseMutex = r; });
 
-    this.socket.write(Buffer.concat([tokenBuf, Buffer.from(query)]));
+    await prev;
 
     return new Promise((resolve, reject) => {
-      this.pendingQueries.set(token, { resolve: resolve as (v: Response) => void, reject });
-      setTimeout(() => {
-        if (this.pendingQueries.has(token)) {
-          this.pendingQueries.delete(token);
-          reject(new Error('Query timeout'));
-        }
+      // Send: length (4 bytes LE) + JSON data
+      const header = Buffer.alloc(4);
+      header.writeUInt32LE(queryBuf.length, 0);
+
+      this.socket!.write(Buffer.concat([header, queryBuf]));
+
+      const timeout = setTimeout(() => {
+        releaseMutex!();
+        reject(new Error('Query timeout'));
       }, this.options.timeout);
-    });
-  }
 
-  /**
-   * Handle incoming data
-   */
-  private handleData(data: Buffer): void {
-    this.buffer = Buffer.concat([this.buffer, data]);
+      // Read response: length (4 bytes) + JSON
+      const readResponse = (data: Buffer) => {
+        this.buffer = Buffer.concat([this.buffer, data]);
 
-    while (this.buffer.length >= 12) {
-      const token = Number(this.buffer.readBigUInt64LE(0));
-      const responseLen = this.buffer.readUInt32LE(8);
+        if (this.buffer.length >= 4) {
+          const respLen = this.buffer.readUInt32LE(0);
+          if (this.buffer.length >= 4 + respLen) {
+            const respStr = this.buffer.subarray(4, 4 + respLen).toString();
+            this.buffer = this.buffer.subarray(4 + respLen);
+            this.socket!.off('data', readResponse);
+            clearTimeout(timeout);
 
-      if (this.buffer.length < 12 + responseLen) {
-        break; // Need more data
-      }
+            try {
+              const resp = JSON.parse(respStr);
+              const response: Response<T> = {
+                type: resp.t,
+                data: resp.r,
+                token,
+                notes: resp.n,
+              };
 
-      const responseStr = this.buffer.subarray(12, 12 + responseLen).toString();
-      this.buffer = this.buffer.subarray(12 + responseLen);
-
-      try {
-        const response = JSON.parse(responseStr) as Response;
-        response.token = token;
-
-        const pending = this.pendingQueries.get(token);
-        if (pending) {
-          this.pendingQueries.delete(token);
-          if (response.type === ResponseType.RUNTIME_ERROR ||
-              response.type === ResponseType.COMPILE_ERROR ||
-              response.type === ResponseType.CLIENT_ERROR) {
-            pending.reject(new Error(response.error || 'Query error'));
-          } else {
-            pending.resolve(response);
+              if (response.type === ResponseType.RUNTIME_ERROR ||
+                  response.type === ResponseType.COMPILE_ERROR ||
+                  response.type === ResponseType.CLIENT_ERROR) {
+                const errMsg = (Array.isArray(response.notes) && response.notes.length > 0)
+                  ? response.notes[0]
+                  : (response.error || 'Query error');
+                releaseMutex!();
+                reject(new Error(errMsg));
+              } else {
+                releaseMutex!();
+                resolve(response);
+              }
+            } catch (err) {
+              releaseMutex!();
+              reject(err instanceof Error ? err : new Error(String(err)));
+            }
+            return;
           }
         }
-      } catch (err) {
-        const pending = this.pendingQueries.get(token);
-        if (pending) {
-          this.pendingQueries.delete(token);
-          pending.reject(err instanceof Error ? err : new Error(String(err)));
-        }
-      }
-    }
+        // Need more data
+      };
+
+      this.socket!.on('data', readResponse);
+    });
   }
 
   /**

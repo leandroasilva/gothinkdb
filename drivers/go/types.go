@@ -26,8 +26,8 @@ const (
 type Response struct {
 	Type    int             `json:"t"`
 	Token   uint64          `json:"token,omitempty"`
-	Data    json.RawMessage `json:"response,omitempty"`
-	Notes   []int           `json:"n,omitempty"`
+	Data    json.RawMessage `json:"r,omitempty"`
+	Notes   []string        `json:"n,omitempty"`
 	Profile interface{}     `json:"p,omitempty"`
 	Error   string          `json:"e,omitempty"`
 }
@@ -47,35 +47,26 @@ type WriteResult struct {
 	Errors   int `json:"errors"`
 }
 
-// TermType constants matching the ReQL protocol.
+// TermType constants matching the GoThinkDB evaluator term numbers.
 const (
 	TermDatum       = 1
 	TermMakeArray   = 2
 	TermMakeObj     = 3
-	TermVar         = 10
-	TermDB          = 14
-	TermTable       = 15
-	TermGet         = 16
-	TermInsert      = 17
-	TermUpdate      = 18
-	TermDelete      = 19
-	TermReplace     = 20
+	TermHasFields   = 33
+	TermWithout     = 34
+	TermMerge       = 36
 	TermFilter      = 39
 	TermMap         = 40
 	TermOrderBy     = 41
 	TermLimit       = 42
 	TermSkip        = 43
-	TermGetAll      = 78
-	TermDBCreate    = 57
-	TermDBDrop      = 58
-	TermDBList      = 59
-	TermTableCreate = 60
-	TermTableDrop   = 61
-	TermTableList   = 62
-	TermIndexCreate = 75
-	TermIndexDrop   = 76
-	TermIndexList   = 77
-	TermChanges     = 152
+	TermInnerJoin   = 48
+	TermOuterJoin   = 49
+	TermTable       = 10
+	TermInsert      = 17
+	TermUpdate      = 18
+	TermDelete      = 19
+	TermReplace     = 20
 	TermCount       = 86
 	TermSum         = 87
 	TermAvg         = 88
@@ -84,10 +75,18 @@ const (
 	TermGroup       = 91
 	TermUngroup     = 92
 	TermReduce      = 93
-	TermHasFields   = 33
-	TermWithout     = 34
-	TermMerge       = 36
-	TermBetween     = 182
-	TermInnerJoin   = 48
-	TermOuterJoin   = 49
+	TermGet         = 70
+	TermGetAll      = 78
+	TermIndexCreate = 75
+	TermIndexDrop   = 76
+	TermIndexList   = 77
+	TermDB          = 14
+	TermDBCreate    = 57
+	TermDBDrop      = 58
+	TermDBList      = 59
+	TermTableCreate = 60
+	TermTableDrop   = 61
+	TermTableList   = 62
+	TermChanges     = 152
+	TermBetween     = 172
 )

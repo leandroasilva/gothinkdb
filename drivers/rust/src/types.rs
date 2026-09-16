@@ -55,12 +55,12 @@ impl From<u8> for ResponseType {
 pub struct Response {
     #[serde(rename = "t")]
     pub response_type: u8,
-    #[serde(rename = "response")]
+    #[serde(rename = "r")]
     pub data: Option<serde_json::Value>,
     #[serde(rename = "e")]
     pub error: Option<String>,
     #[serde(rename = "n")]
-    pub notes: Option<Vec<i32>>,
+    pub notes: Option<Vec<String>>,
 }
 
 /// A changefeed event.
@@ -85,15 +85,15 @@ pub struct WriteResult {
     pub errors: i64,
 }
 
-/// ReQL term type constants.
+/// ReQL term type constants (matching GoThinkDB evaluator).
 pub mod term {
     pub const DATUM: u32 = 1;
     pub const MAKE_ARRAY: u32 = 2;
     pub const MAKE_OBJ: u32 = 3;
-    pub const VAR: u32 = 10;
-    pub const DB: u32 = 14;
-    pub const TABLE: u32 = 15;
-    pub const GET: u32 = 16;
+    pub const HAS_FIELDS: u32 = 33;
+    pub const WITHOUT: u32 = 34;
+    pub const MERGE: u32 = 36;
+    pub const TABLE: u32 = 10;
     pub const INSERT: u32 = 17;
     pub const UPDATE: u32 = 18;
     pub const DELETE: u32 = 19;
@@ -103,17 +103,13 @@ pub mod term {
     pub const ORDER_BY: u32 = 41;
     pub const LIMIT: u32 = 42;
     pub const SKIP: u32 = 43;
-    pub const GET_ALL: u32 = 78;
-    pub const DB_CREATE: u32 = 57;
-    pub const DB_DROP: u32 = 58;
-    pub const DB_LIST: u32 = 59;
-    pub const TABLE_CREATE: u32 = 60;
-    pub const TABLE_DROP: u32 = 61;
-    pub const TABLE_LIST: u32 = 62;
+    pub const INNER_JOIN: u32 = 48;
+    pub const OUTER_JOIN: u32 = 49;
+    pub const GET: u32 = 70;
     pub const INDEX_CREATE: u32 = 75;
     pub const INDEX_DROP: u32 = 76;
     pub const INDEX_LIST: u32 = 77;
-    pub const CHANGES: u32 = 152;
+    pub const GET_ALL: u32 = 78;
     pub const COUNT: u32 = 86;
     pub const SUM: u32 = 87;
     pub const AVG: u32 = 88;
@@ -122,12 +118,15 @@ pub mod term {
     pub const GROUP: u32 = 91;
     pub const UNGROUP: u32 = 92;
     pub const REDUCE: u32 = 93;
-    pub const HAS_FIELDS: u32 = 33;
-    pub const WITHOUT: u32 = 34;
-    pub const MERGE: u32 = 36;
-    pub const BETWEEN: u32 = 182;
-    pub const INNER_JOIN: u32 = 48;
-    pub const OUTER_JOIN: u32 = 49;
+    pub const DB: u32 = 14;
+    pub const DB_CREATE: u32 = 57;
+    pub const DB_DROP: u32 = 58;
+    pub const DB_LIST: u32 = 59;
+    pub const TABLE_CREATE: u32 = 60;
+    pub const TABLE_DROP: u32 = 61;
+    pub const TABLE_LIST: u32 = 62;
+    pub const CHANGES: u32 = 152;
+    pub const BETWEEN: u32 = 172;
 }
 
 /// Error types for the driver.
@@ -143,6 +142,10 @@ pub enum Error {
     NotConnected,
     #[error("timeout")]
     Timeout,
+    #[error("pool exhausted")]
+    PoolExhausted,
+    #[error("pool closed")]
+    PoolClosed,
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
     #[error("io error: {0}")]

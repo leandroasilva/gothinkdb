@@ -1,21 +1,19 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::types::*;
 
-const V1_MAGIC: u32 = 0x34c2bdc3;
-const JSON_PROTO: u32 = 0x271ffc41;
+const V0_4_MAGIC: u32 = 0x400c2d20;
+const JSON_PROTOCOL: u32 = 0x7e6970c7;
 
 /// A connection to a GoThinkDB server.
 pub struct Connection {
     stream: Arc<Mutex<TcpStream>>,
     opts: ConnectOptions,
     token: Arc<Mutex<u64>>,
-    pending: Arc<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<Response>>>>,
     closed: Arc<Mutex<bool>>,
 }
 
@@ -35,67 +33,35 @@ impl Connection {
             stream: Arc::new(Mutex::new(stream)),
             opts,
             token: Arc::new(Mutex::new(0)),
-            pending: Arc::new(Mutex::new(HashMap::new())),
             closed: Arc::new(Mutex::new(false)),
         };
 
         conn.handshake().await?;
-
-        // Start read loop
-        let stream = conn.stream.clone();
-        let pending = conn.pending.clone();
-        let closed = conn.closed.clone();
-        tokio::spawn(async move {
-            Self::read_loop(stream, pending, closed).await;
-        });
-
         Ok(conn)
     }
 
-    /// Perform V1.0 handshake.
+    /// Perform V0.4 handshake.
     async fn handshake(&self) -> Result<()> {
         let mut stream = self.stream.lock().await;
 
-        // Send magic
-        stream.write_all(&V1_MAGIC.to_le_bytes()).await?;
+        // Send V0.4 magic
+        stream.write_all(&V0_4_MAGIC.to_le_bytes()).await?;
 
-        // Send auth JSON (null-terminated)
-        let auth = serde_json::json!({
-            "protocol_version": 1,
-            "authentication_method": "SCRAM-SHA-256",
-            "authentication": ""
-        });
-        let mut auth_bytes = serde_json::to_vec(&auth)?;
-        auth_bytes.push(0);
-        stream.write_all(&auth_bytes).await?;
+        // Send auth key size (0)
+        stream.write_all(&0u32.to_le_bytes()).await?;
 
-        // Read response (null-terminated)
+        // Send JSON wire protocol
+        stream.write_all(&JSON_PROTOCOL.to_le_bytes()).await?;
+
+        // Read SUCCESS\0 response
         let resp = Self::read_null_terminated(&mut *stream).await?;
         let resp_str = String::from_utf8_lossy(&resp);
 
-        // Try parsing as JSON
-        if let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(&resp) {
-            if parsed.get("success").and_then(|v| v.as_bool()).unwrap_or(false)
-                || parsed.get("authentication").and_then(|v| v.as_str()) == Some("SUCCESS")
-            {
-                // Send protocol selection
-                stream.write_all(&JSON_PROTO.to_le_bytes()).await?;
-
-                // Read protocol response
-                let proto_resp = Self::read_null_terminated(&mut *stream).await?;
-                let proto_str = String::from_utf8_lossy(&proto_resp);
-                if proto_str == "SUCCESS" {
-                    return Ok(());
-                }
-                return Err(Error::Handshake(format!("protocol error: {}", proto_str)));
-            }
-        }
-
         if resp_str == "SUCCESS" {
-            return Ok(());
+            Ok(())
+        } else {
+            Err(Error::Handshake(format!("handshake failed: {}", resp_str)))
         }
-
-        Err(Error::Handshake(format!("auth failed: {}", resp_str)))
     }
 
     /// Read null-terminated bytes from stream.
@@ -111,44 +77,7 @@ impl Connection {
         }
     }
 
-    /// Read loop that dispatches responses to pending queries.
-    async fn read_loop(
-        stream: Arc<Mutex<TcpStream>>,
-        pending: Arc<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<Response>>>>,
-        closed: Arc<Mutex<bool>>,
-    ) {
-        let mut stream = stream.lock().await;
-        loop {
-            if *closed.lock().await {
-                break;
-            }
-
-            // Read header: token (8 bytes) + length (4 bytes)
-            let mut header = [0u8; 12];
-            if stream.read_exact(&mut header).await.is_err() {
-                break;
-            }
-
-            let token = u64::from_le_bytes(header[0..8].try_into().unwrap());
-            let resp_len = u32::from_le_bytes(header[8..12].try_into().unwrap()) as usize;
-
-            // Read response body
-            let mut body = vec![0u8; resp_len];
-            if stream.read_exact(&mut body).await.is_err() {
-                break;
-            }
-
-            // Parse response
-            if let Ok(resp) = serde_json::from_slice::<Response>(&body) {
-                let mut pending = pending.lock().await;
-                if let Some(sender) = pending.remove(&token) {
-                    let _ = sender.send(resp);
-                }
-            }
-        }
-    }
-
-    /// Send a query to the server.
+    /// Send a query to the server (synchronous: send and read response).
     pub async fn query(&self, term: serde_json::Value) -> Result<Response> {
         if *self.closed.lock().await {
             return Err(Error::NotConnected);
@@ -159,42 +88,51 @@ impl Connection {
         let token = *token_counter;
         drop(token_counter);
 
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.pending.lock().await.insert(token, tx);
-
-        // Build query: [1, term] (START = 1)
-        let query = serde_json::json!([1, term]);
-        let mut query_bytes = serde_json::to_vec(&query)?;
-        query_bytes.push(0); // null-terminate
-
-        // Send: token (8 bytes) + length (4 bytes) + query
-        let mut header = Vec::with_capacity(12);
-        header.extend_from_slice(&token.to_le_bytes());
-        header.extend_from_slice(&(query_bytes.len() as u32).to_le_bytes());
-
         let mut stream = self.stream.lock().await;
-        stream.write_all(&header).await?;
+
+        // Build query JSON: {"token": N, "type": 1, "query": term}
+        let query_obj = serde_json::json!({
+            "token": token,
+            "type": 1,
+            "query": term
+        });
+        let query_bytes = serde_json::to_vec(&query_obj)?;
+
+        // Send: length (4 bytes LE) + JSON data
+        let len = query_bytes.len() as u32;
+        stream.write_all(&len.to_le_bytes()).await?;
         stream.write_all(&query_bytes).await?;
+        stream.flush().await?;
+
+        // Read response: length (4 bytes LE) + JSON data
+        let mut len_buf = [0u8; 4];
+        stream.read_exact(&mut len_buf).await?;
+        let resp_len = u32::from_le_bytes(len_buf) as usize;
+
+        if resp_len > 64 * 1024 * 1024 {
+            return Err(Error::Connection("response too large".to_string()));
+        }
+
+        let mut body = vec![0u8; resp_len];
+        stream.read_exact(&mut body).await?;
         drop(stream);
 
-        // Wait for response with timeout
-        match tokio::time::timeout(Duration::from_secs(30), rx).await {
-            Ok(Ok(resp)) => {
-                let rt = ResponseType::from(resp.response_type);
-                if rt == ResponseType::RuntimeError
-                    || rt == ResponseType::CompileError
-                    || rt == ResponseType::ClientError
-                {
-                    return Err(Error::Query(resp.error.unwrap_or_else(|| "unknown error".to_string())));
-                }
-                Ok(resp)
-            }
-            Ok(Err(_)) => Err(Error::Connection("channel closed".to_string())),
-            Err(_) => {
-                self.pending.lock().await.remove(&token);
-                Err(Error::Timeout)
-            }
+        let resp: Response = serde_json::from_slice(&body)?;
+
+        let rt = ResponseType::from(resp.response_type);
+        if rt == ResponseType::RuntimeError
+            || rt == ResponseType::CompileError
+            || rt == ResponseType::ClientError
+        {
+            let err_msg = resp.notes.as_ref()
+                .and_then(|n| n.first())
+                .cloned()
+                .or(resp.error.clone())
+                .unwrap_or_else(|| "unknown error".to_string());
+            return Err(Error::Query(err_msg));
         }
+
+        Ok(resp)
     }
 
     /// Close the connection.

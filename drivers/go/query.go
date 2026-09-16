@@ -201,7 +201,7 @@ type TableQuery struct {
 
 // Table creates a new table query on a specific database.
 func (d *DbQuery) Table(name string) *TableQuery {
-	term := []interface{}{TermTable, d.term, name}
+	term := []interface{}{TermTable, name}
 	return &TableQuery{Query: NewQuery(term, d.conn)}
 }
 
@@ -297,11 +297,7 @@ func (r *R) DB(name string) *DbQuery {
 
 // Table returns a table reference using the default database.
 func (r *R) Table(name string) *TableQuery {
-	dbName := r.db
-	if dbName == "" {
-		dbName = "test"
-	}
-	term := []interface{}{TermTable, []interface{}{TermDB, dbName}, name}
+	term := []interface{}{TermTable, name}
 	return &TableQuery{Query: NewQuery(term, r.conn)}
 }
 

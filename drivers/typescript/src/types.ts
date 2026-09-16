@@ -21,7 +21,7 @@ export interface Response<T = unknown> {
   type: ResponseType;
   data: T;
   token: number;
-  notes?: number[];
+  notes?: string[];
   profile?: unknown;
   error?: string;
 }
@@ -47,3 +47,19 @@ export interface ChangeEvent<T = Record<string, unknown>> {
 }
 
 export type QueryTerm = [number, ...unknown[]];
+
+export interface PoolOptions extends ConnectionOptions {
+  maxConns?: number;
+  minConns?: number;
+  connMaxLifetime?: number;
+}
+
+export interface PoolStats {
+  totalConns: number;
+  idleConns: number;
+  inUseConns: number;
+  maxConns: number;
+  minConns: number;
+  totalCreated: number;
+  totalDestroyed: number;
+}
