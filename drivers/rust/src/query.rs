@@ -22,7 +22,15 @@ impl Query {
     /// Execute the query on a connection.
     pub async fn run(&self, conn: &Connection) -> Result<serde_json::Value> {
         let resp = conn.query(self.term.clone()).await?;
-        Ok(resp.data.unwrap_or(json!(null)))
+        let data = resp.data.unwrap_or(json!(null));
+        // The server wraps all responses in an array (RethinkDB convention).
+        // Unwrap single-element arrays.
+        if let Some(arr) = data.as_array() {
+            if arr.len() == 1 {
+                return Ok(arr[0].clone());
+            }
+        }
+        Ok(data)
     }
 
     /// Execute and decode the result into a typed value.
@@ -49,8 +57,8 @@ impl Query {
         Query::new(json!([term::SKIP, self.term, n]))
     }
 
-    pub fn between(self, lower: serde_json::Value, upper: serde_json::Value) -> Query {
-        Query::new(json!([term::BETWEEN, self.term, lower, upper]))
+    pub fn between(self, index: &str, lower: serde_json::Value, upper: serde_json::Value) -> Query {
+        Query::new(json!([term::BETWEEN, self.term, index, lower, upper]))
     }
 
     pub fn pluck(self, fields: Vec<String>) -> Query {
@@ -67,6 +75,26 @@ impl Query {
 
     pub fn has_fields(self, fields: Vec<String>) -> Query {
         Query::new(json!([term::HAS_FIELDS, self.term, fields]))
+    }
+
+    pub fn has_fields(self, fields: Vec<String>) -> Query {
+        Query::new(json!([term::HAS_FIELDS, self.term, fields]))
+    }
+
+    pub fn without(self, fields: Vec<String>) -> Query {
+        Query::new(json!([term::WITHOUT, self.term, fields]))
+    }
+
+    pub fn merge(self, other: serde_json::Value) -> Query {
+        Query::new(json!([term::MERGE, self.term, other]))
+    }
+
+    pub fn inner_join(self, other: serde_json::Value, predicate: serde_json::Value) -> Query {
+        Query::new(json!([term::INNER_JOIN, self.term, other, predicate]))
+    }
+
+    pub fn outer_join(self, other: serde_json::Value, predicate: serde_json::Value) -> Query {
+        Query::new(json!([term::OUTER_JOIN, self.term, other, predicate]))
     }
 
     // === Mutations ===
@@ -158,6 +186,62 @@ impl TableQuery {
         Query::new(json!([term::INSERT, self.query.term, doc]))
     }
 
+    pub fn update(self, changes: serde_json::Value) -> Query {
+        Query::new(json!([term::UPDATE, self.query.term, changes]))
+    }
+
+    pub fn delete(self) -> Query {
+        Query::new(json!([term::DELETE, self.query.term]))
+    }
+
+    pub fn filter(self, predicate: serde_json::Value) -> Query {
+        Query::new(json!([term::FILTER, self.query.term, predicate]))
+    }
+
+    pub fn order_by(self, fields: Vec<String>) -> Query {
+        Query::new(json!([term::ORDER_BY, self.query.term, fields]))
+    }
+
+    pub fn limit(self, n: u64) -> Query {
+        Query::new(json!([term::LIMIT, self.query.term, n]))
+    }
+
+    pub fn skip(self, n: u64) -> Query {
+        Query::new(json!([term::SKIP, self.query.term, n]))
+    }
+
+    pub fn count(self) -> Query {
+        Query::new(json!([term::COUNT, self.query.term]))
+    }
+
+    pub fn sum(self, field: &str) -> Query {
+        Query::new(json!([term::SUM, self.query.term, field]))
+    }
+
+    pub fn avg(self, field: &str) -> Query {
+        Query::new(json!([term::AVG, self.query.term, field]))
+    }
+
+    pub fn min(self, field: &str) -> Query {
+        Query::new(json!([term::MIN, self.query.term, field]))
+    }
+
+    pub fn max(self, field: &str) -> Query {
+        Query::new(json!([term::MAX, self.query.term, field]))
+    }
+
+    pub fn group(self, field: &str) -> Query {
+        Query::new(json!([term::GROUP, self.query.term, field]))
+    }
+
+    pub fn has_fields(self, fields: Vec<String>) -> Query {
+        Query::new(json!([term::HAS_FIELDS, self.query.term, fields]))
+    }
+
+    pub fn without(self, fields: Vec<String>) -> Query {
+        Query::new(json!([term::WITHOUT, self.query.term, fields]))
+    }
+
     pub fn index_create(self, name: &str) -> Query {
         Query::new(json!([term::INDEX_CREATE, self.query.term, name]))
     }
@@ -192,11 +276,11 @@ impl DbQuery {
     }
 
     pub fn table_create(self, name: &str) -> Query {
-        Query::new(json!([term::TABLE_CREATE, self.term, name]))
+        Query::new(json!([term::TABLE_CREATE, name, self.term]))
     }
 
     pub fn table_drop(self, name: &str) -> Query {
-        Query::new(json!([term::TABLE_DROP, self.term, name]))
+        Query::new(json!([term::TABLE_DROP, name, self.term]))
     }
 
     pub fn table_list(self) -> Query {

@@ -68,7 +68,13 @@ export class QueryBuilder<T = unknown> {
       throw new Error('No connection provided. Pass a connection to run() or create queries from a connection.');
     }
     const response: Response<T> = await connection.query(this.term);
-    return response.data;
+    // The server wraps all responses in an array (RethinkDB convention).
+    // Unwrap single-element arrays.
+    const data = response.data;
+    if (Array.isArray(data) && data.length === 1) {
+      return data[0] as T;
+    }
+    return data;
   }
 
   /**
@@ -101,8 +107,8 @@ export class QueryBuilder<T = unknown> {
     return new QueryBuilder([TermType.SKIP, this.term, n], this.conn);
   }
 
-  between(lower: unknown, upper: unknown): QueryBuilder<T> {
-    return new QueryBuilder([TermType.BETWEEN, this.term, lower, upper], this.conn);
+  between(index: string, lower: unknown, upper: unknown): QueryBuilder<T> {
+    return new QueryBuilder([TermType.BETWEEN, this.term, index, lower, upper], this.conn);
   }
 
   pluck(...fields: string[]): QueryBuilder<T> {
@@ -244,11 +250,11 @@ export class DbQuery extends QueryBuilder {
   }
 
   tableCreate(tableName: string): QueryBuilder<{ tables_created: number }> {
-    return new QueryBuilder([TermType.TABLE_CREATE, this.term, tableName], this.conn);
+    return new QueryBuilder([TermType.TABLE_CREATE, tableName, this.term], this.conn);
   }
 
   tableDrop(tableName: string): QueryBuilder<{ tables_dropped: number }> {
-    return new QueryBuilder([TermType.TABLE_DROP, this.term, tableName], this.conn);
+    return new QueryBuilder([TermType.TABLE_DROP, tableName, this.term], this.conn);
   }
 
   tableList(): QueryBuilder<string[]> {
