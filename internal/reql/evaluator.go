@@ -35,6 +35,15 @@ func (e *Evaluator) GetAdmin() *AdminManager {
 	return e.admin
 }
 
+// GetTables returns all table names from the evaluator's flat map
+func (e *Evaluator) GetTables() []string {
+	names := make([]string, 0, len(e.tables))
+	for name := range e.tables {
+		names = append(names, name)
+	}
+	return names
+}
+
 func (e *Evaluator) GetOrCreateTable(name string) *Table {
 	if table, ok := e.tables[name]; ok {
 		return table
@@ -46,6 +55,13 @@ func (e *Evaluator) GetOrCreateTable(name string) *Table {
 		Changefeeds: make([]*Changefeed, 0),
 	}
 	e.tables[name] = table
+
+	// Also register in admin manager so it appears in the dashboard
+	// and sync the reference so admin uses the same table instance
+	if e.admin.CreateTable("test", name) == nil {
+		e.admin.SyncTableRef("test", name, table)
+	}
+
 	return table
 }
 
@@ -957,6 +973,9 @@ func (e *Evaluator) evalTableCreate(ctx context.Context, args []datum.Datum) (da
 	if err := e.admin.CreateTable(dbName, tableName.Str()); err != nil {
 		return datum.Datum{}, err
 	}
+
+	// Also create in evaluator's flat map so queries work immediately
+	e.GetOrCreateTable(tableName.Str())
 
 	return datum.NewObject(datum.NewObjectDataFromMap(map[string]datum.Datum{
 		"tables_created": datum.NewNum(1),

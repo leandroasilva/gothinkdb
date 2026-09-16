@@ -392,6 +392,7 @@ func (s *Server) handleTables(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Get tables from admin manager for the specific database
 	tables, err := s.evaluator.GetAdmin().ListTables(dbName)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -449,6 +450,9 @@ func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
 		}
+		// Create in evaluator's flat map and sync the reference
+		table := s.evaluator.GetOrCreateTable(name)
+		s.evaluator.GetAdmin().SyncTableRef(dbName, name, table)
 		user, _ := auth.UserFromContext(r.Context())
 		username := "unknown"
 		if user != nil {

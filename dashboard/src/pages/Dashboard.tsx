@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -31,6 +32,8 @@ async function fetchJSON(url: string) {
 }
 
 export function DashboardPage() {
+  const navigate = useNavigate()
+
   const { data: health } = useQuery({
     queryKey: ['health'],
     queryFn: () => fetchJSON('/api/health'),
@@ -70,6 +73,24 @@ export function DashboardPage() {
   // Calculate total tables across all databases
   const dbList = Array.isArray(databases) ? databases : []
   const dbCount = dbList.length
+
+  const { data: allTables } = useQuery({
+    queryKey: ['allTables'],
+    queryFn: async () => {
+      const tables: string[] = []
+      for (const db of dbList) {
+        const dbTables = await fetchJSON(`/api/tables?db=${db}`)
+        if (Array.isArray(dbTables)) {
+          tables.push(...dbTables)
+        }
+      }
+      return tables
+    },
+    enabled: dbList.length > 0,
+    refetchInterval: 5000,
+  })
+
+  const tableCount = Array.isArray(allTables) ? allTables.length : 0
 
   // Chart data from real metrics
   const chartData = metrics?.history || []
@@ -117,13 +138,13 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="cursor-pointer hover:border-primary/50 transition-colors" onClick={() => navigate('/tables')}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Tables</CardTitle>
             <Table2 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{dbCount > 0 ? 'See Tables' : '0'}</div>
+            <div className="text-2xl font-bold">{tableCount}</div>
             <p className="text-xs text-muted-foreground">
               {dbCount > 0 ? `${dbCount} database${dbCount > 1 ? 's' : ''}` : 'No databases'}
             </p>
