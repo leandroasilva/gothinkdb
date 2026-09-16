@@ -76,12 +76,13 @@ async fn test_insert_1000_records() {
     cleanup(&conn, "rust_bulk").await;
 
     let start = std::time::Instant::now();
+    let cities = ["SP", "RJ", "MG", "PR"];
     for i in 0..1100 {
         let doc = json!({
             "id": format!("bulk_{:04}", i),
             "name": format!("User {}", i),
             "age": 18 + (i % 50),
-            "city": ["SP", "RJ", "MG", "PR"][i % 4],
+            "city": cities[i % 4],
             "active": i % 2 == 0,
             "score": (i as f64) * 1.5,
         });
@@ -115,10 +116,11 @@ async fn test_multi_table_crud() {
     let products = r.table("rust_products");
 
     // Insert 50 users
+    let user_cities = ["SP", "RJ", "MG"];
     for i in 0..50 {
         users.clone().insert(json!({
             "id": format!("u{}", i), "name": format!("User{}", i),
-            "city": ["SP", "RJ", "MG"][i % 3], "age": 20 + i,
+            "city": user_cities[i % 3], "age": 20 + i,
         })).run(&conn).await.unwrap();
     }
 
@@ -131,12 +133,13 @@ async fn test_multi_table_crud() {
     }
 
     // Insert 100 orders
+    let statuses = ["pending", "shipped", "delivered"];
     for i in 0..100 {
         orders.clone().insert(json!({
             "id": format!("o{}", i), "user_id": format!("u{}", i % 50),
             "product_id": format!("p{}", i % 20), "quantity": 1 + (i % 10),
             "total": 50.0 + (i as f64) * 3.25,
-            "status": ["pending", "shipped", "delivered"][i % 3],
+            "status": statuses[i % 3],
         })).run(&conn).await.unwrap();
     }
     println!("Inserted 50 users, 20 products, 100 orders");
@@ -180,10 +183,11 @@ async fn test_filter_order_limit_skip() {
     let table = r.table("rust_query");
     cleanup(&conn, "rust_query").await;
 
+    let query_cities = ["SP", "RJ", "MG", "PR"];
     for i in 0..100 {
         table.clone().insert(json!({
             "id": format!("q{:03}", i), "name": format!("Item{}", i),
-            "city": ["SP", "RJ", "MG", "PR"][i % 4],
+            "city": query_cities[i % 4],
             "active": i % 2 == 0, "score": i,
         })).run(&conn).await.unwrap();
     }
@@ -230,10 +234,11 @@ async fn test_aggregations() {
     let table = r.table("rust_agg");
     cleanup(&conn, "rust_agg").await;
 
+    let groups = ["A", "B", "C", "D"];
     for i in 0..200 {
         table.clone().insert(json!({
             "id": format!("a{}", i), "value": i + 1,
-            "group": ["A", "B", "C", "D"][i % 4],
+            "group": groups[i % 4],
         })).run(&conn).await.unwrap();
     }
 

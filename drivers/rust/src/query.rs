@@ -77,18 +77,6 @@ impl Query {
         Query::new(json!([term::HAS_FIELDS, self.term, fields]))
     }
 
-    pub fn has_fields(self, fields: Vec<String>) -> Query {
-        Query::new(json!([term::HAS_FIELDS, self.term, fields]))
-    }
-
-    pub fn without(self, fields: Vec<String>) -> Query {
-        Query::new(json!([term::WITHOUT, self.term, fields]))
-    }
-
-    pub fn merge(self, other: serde_json::Value) -> Query {
-        Query::new(json!([term::MERGE, self.term, other]))
-    }
-
     pub fn inner_join(self, other: serde_json::Value, predicate: serde_json::Value) -> Query {
         Query::new(json!([term::INNER_JOIN, self.term, other, predicate]))
     }
@@ -161,6 +149,7 @@ impl Query {
 }
 
 /// Table query with additional operations.
+#[derive(Clone)]
 pub struct TableQuery {
     query: Query,
 }

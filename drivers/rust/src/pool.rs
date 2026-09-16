@@ -87,6 +87,7 @@ impl Pool {
                 in_use: false,
             });
         }
+        drop(conns);
 
         Ok(pool)
     }

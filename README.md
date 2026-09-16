@@ -175,6 +175,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Testing
+
+GoThinkDB includes comprehensive test coverage across all components.
+
+### Core Database Tests
+
+```bash
+# Run all core tests
+go test ./internal/... ./pkg/...
+
+# Run specific module tests
+go test ./internal/btree/...      # B-Tree operations
+go test ./internal/reql/...       # Query evaluator
+go test ./internal/storage/...    # Storage engine
+go test ./internal/raft/...       # Raft consensus
+go test ./internal/rpc/...        # Cluster RPC
+go test ./pkg/datum/...           # Data types
+```
+
+### Driver Tests
+
+All drivers include comprehensive integration tests covering CRUD operations, aggregations, joins, indexes, connection pooling, and concurrent operations.
+
+**Go Driver (12 tests):**
+```bash
+cd drivers/go
+go test -tags integration -v
+```
+
+Tests: Database operations, Table operations, 1000+ record insertion, Multi-table CRUD, Filter/OrderBy/Limit/Skip, Aggregations (count/sum/avg/min/max/group), Index operations, Between queries, Projection (hasFields/without), Joins (inner/outer), Connection pool control, Concurrent pool operations.
+
+**TypeScript Driver (23 tests):**
+```bash
+cd drivers/typescript
+npm test
+```
+
+Same coverage as Go driver with additional edge cases.
+
+**Rust Driver (7 tests):**
+```bash
+cd drivers/rust
+cargo test --test integration_test
+```
+
+Tests: Database operations, Table operations, 1000+ record insertion, Multi-table CRUD, Filter/OrderBy/Limit/Skip, Aggregations, Connection pool control.
+
+### Test Coverage
+
+| Component | Test Files | Coverage |
+|-----------|-----------|----------|
+| B-Tree | 4 files | Insert, delete, search, split, multi-key |
+| Protocol | 1 file | Handshake, query parsing, response formatting |
+| ReQL Evaluator | 2 files | All term types, aggregations, joins |
+| Storage | 1 file | Block operations, serialization, page cache |
+| Raft | 5 files | Leader election, log replication, consistency |
+| RPC | 1 file | Cluster communication, health checks |
+| Datum | 1 file | Type conversions, comparisons |
+| Go Driver | 3 files | Unit + comprehensive integration |
+| TypeScript Driver | 3 files | Unit + comprehensive integration |
+| Rust Driver | 1 file | Comprehensive integration |
+
 ## Development
 
 ### Prerequisites
