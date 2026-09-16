@@ -1,6 +1,6 @@
 [package]
 name = "gothinkdb"
-version = "0.1.2"
+version = "0.1.5"
 edition = "2021"
 description = "GoThinkDB driver for Rust - RethinkDB compatible"
 license = "Apache-2.0"
