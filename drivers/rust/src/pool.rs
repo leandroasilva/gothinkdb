@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use std::time::Instant;
 
 use crate::connection::{Connection, connect};
 use crate::types::*;
