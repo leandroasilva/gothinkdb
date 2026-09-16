@@ -1,6 +1,6 @@
 {
   "name": "gothinkdb-driver",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "GoThinkDB driver for JavaScript/TypeScript - RethinkDB compatible",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
