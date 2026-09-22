@@ -27,9 +27,13 @@ export function ExplorerPage() {
     if (!query.trim()) return
     setLoading(true)
     try {
+      const token = localStorage.getItem('auth_token')
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (token) headers['Authorization'] = `Bearer ${token}`
+
       const res = await fetch('/api/query', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ query }),
       })
       const data = await res.json()

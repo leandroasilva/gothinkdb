@@ -115,6 +115,7 @@ func (am *AdminManager) CreateTable(dbName, tableName string) error {
 		return fmt.Errorf("table %s already exists in database %s", tableName, dbName)
 	}
 
+	// Create placeholder - will be replaced with evaluator's table via SyncTableRef
 	db.Tables[tableName] = &Table{
 		Name:        tableName,
 		Data:        make(map[string]datum.Datum),
@@ -123,6 +124,35 @@ func (am *AdminManager) CreateTable(dbName, tableName string) error {
 	}
 
 	return nil
+}
+
+// SyncTableRef replaces the admin's table placeholder with the evaluator's actual table instance.
+// This ensures data written via the evaluator is visible through the admin API.
+// It also removes the table from other databases to prevent duplicates.
+func (am *AdminManager) SyncTableRef(dbName, tableName string, evaluatorTable *Table) bool {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	// Remove from all other databases first
+	for name, db := range am.databases {
+		if name != dbName {
+			db.mu.Lock()
+			delete(db.Tables, tableName)
+			db.mu.Unlock()
+		}
+	}
+
+	// Set in the target database
+	db, exists := am.databases[dbName]
+	if !exists {
+		return false
+	}
+
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	db.Tables[tableName] = evaluatorTable
+	return true
 }
 
 // DropTable drops a table from a database

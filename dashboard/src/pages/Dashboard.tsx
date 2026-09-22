@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -22,51 +23,78 @@ import {
 } from 'recharts'
 
 async function fetchJSON(url: string) {
-  const res = await fetch(url)
+  const token = localStorage.getItem('auth_token')
+  const headers: Record<string, string> = {}
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  const res = await fetch(url, { headers })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }
 
 export function DashboardPage() {
+  const navigate = useNavigate()
+
   const { data: health } = useQuery({
     queryKey: ['health'],
     queryFn: () => fetchJSON('/api/health'),
+    refetchInterval: 5000,
   })
 
   const { data: serverInfo } = useQuery({
     queryKey: ['serverInfo'],
     queryFn: () => fetchJSON('/api/server/info'),
+    refetchInterval: 5000,
   })
 
   const { data: serverStats } = useQuery({
     queryKey: ['serverStats'],
     queryFn: () => fetchJSON('/api/server/stats'),
+    refetchInterval: 2000,
   })
 
   const { data: databases } = useQuery({
     queryKey: ['databases'],
     queryFn: () => fetchJSON('/api/databases'),
+    refetchInterval: 5000,
   })
 
   const { data: clusterStatus } = useQuery({
     queryKey: ['clusterStatus'],
     queryFn: () => fetchJSON('/api/cluster/status'),
+    refetchInterval: 5000,
   })
 
-  const { data: tables } = useQuery({
-    queryKey: ['tables'],
-    queryFn: () => fetchJSON('/api/tables?db=test'),
+  const { data: metrics } = useQuery({
+    queryKey: ['metrics'],
+    queryFn: () => fetchJSON('/api/metrics'),
+    refetchInterval: 1000,
   })
 
-  // Chart data (simulated for now, will come from real-time API)
-  const chartData = Array.from({ length: 20 }, (_, i) => ({
-    time: `${i}s`,
-    queries: Math.floor(Math.random() * 100) + 50,
-    latency: Math.floor(Math.random() * 20) + 5,
-  }))
+  // Calculate total tables across all databases
+  const dbList = Array.isArray(databases) ? databases : []
+  const dbCount = dbList.length
 
-  const dbCount = Array.isArray(databases) ? databases.length : 0
-  const tableCount = Array.isArray(tables) ? tables.length : 0
+  const { data: allTables } = useQuery({
+    queryKey: ['allTables'],
+    queryFn: async () => {
+      const tables: string[] = []
+      for (const db of dbList) {
+        const dbTables = await fetchJSON(`/api/tables?db=${db}`)
+        if (Array.isArray(dbTables)) {
+          tables.push(...dbTables)
+        }
+      }
+      return tables
+    },
+    enabled: dbList.length > 0,
+    refetchInterval: 5000,
+  })
+
+  const tableCount = Array.isArray(allTables) ? allTables.length : 0
+
+  // Chart data from real metrics
+  const chartData = metrics?.history || []
+
   const memberCount = clusterStatus?.members
     ? Object.keys(clusterStatus.members).length
     : 0
@@ -110,7 +138,7 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="cursor-pointer hover:border-primary/50 transition-colors" onClick={() => navigate('/tables')}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Tables</CardTitle>
             <Table2 className="h-4 w-4 text-muted-foreground" />
@@ -118,7 +146,7 @@ export function DashboardPage() {
           <CardContent>
             <div className="text-2xl font-bold">{tableCount}</div>
             <p className="text-xs text-muted-foreground">
-              In test database
+              {dbCount > 0 ? `${dbCount} database${dbCount > 1 ? 's' : ''}` : 'No databases'}
             </p>
           </CardContent>
         </Card>
@@ -147,21 +175,27 @@ export function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="time" className="text-xs" />
-                <YAxis className="text-xs" />
-                <Tooltip />
-                <Area
-                  type="monotone"
-                  dataKey="queries"
-                  stroke="hsl(var(--primary))"
-                  fill="hsl(var(--primary))"
-                  fillOpacity={0.2}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            {chartData.length === 0 ? (
+              <div className="h-[200px] flex items-center justify-center text-sm text-muted-foreground">
+                Waiting for query data...
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={200}>
+                <AreaChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis dataKey="time" className="text-xs" />
+                  <YAxis className="text-xs" />
+                  <Tooltip />
+                  <Area
+                    type="monotone"
+                    dataKey="queries"
+                    stroke="hsl(var(--primary))"
+                    fill="hsl(var(--primary))"
+                    fillOpacity={0.2}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
 
@@ -173,21 +207,27 @@ export function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="time" className="text-xs" />
-                <YAxis className="text-xs" />
-                <Tooltip />
-                <Area
-                  type="monotone"
-                  dataKey="latency"
-                  stroke="hsl(var(--chart-2))"
-                  fill="hsl(var(--chart-2))"
-                  fillOpacity={0.2}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            {chartData.length === 0 ? (
+              <div className="h-[200px] flex items-center justify-center text-sm text-muted-foreground">
+                Waiting for latency data...
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={200}>
+                <AreaChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis dataKey="time" className="text-xs" />
+                  <YAxis className="text-xs" />
+                  <Tooltip />
+                  <Area
+                    type="monotone"
+                    dataKey="latency"
+                    stroke="hsl(var(--chart-2))"
+                    fill="hsl(var(--chart-2))"
+                    fillOpacity={0.2}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -205,19 +245,19 @@ export function DashboardPage() {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Queries Total</span>
-                <span className="text-sm font-medium">{serverStats?.queries_total || 0}</span>
+                <span className="text-sm font-medium">{metrics?.queries_total ?? serverStats?.queries_total ?? 0}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Queries/sec</span>
-                <span className="text-sm font-medium">{serverStats?.queries_per_second || 0}</span>
+                <span className="text-sm font-medium">{metrics?.queries_per_sec ?? serverStats?.queries_per_second ?? 0}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Connections</span>
-                <span className="text-sm font-medium">{serverStats?.connections || 0}</span>
+                <span className="text-sm font-medium">{metrics?.connections ?? serverStats?.connections ?? 0}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Memory Used</span>
-                <span className="text-sm font-medium">{serverStats?.memory_used || 0} MB</span>
+                <span className="text-sm font-medium">{metrics?.memory_used_mb ?? serverStats?.memory_used ?? 0} MB</span>
               </div>
             </div>
           </CardContent>

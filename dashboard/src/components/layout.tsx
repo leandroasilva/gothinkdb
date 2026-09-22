@@ -1,6 +1,8 @@
-import { Outlet, NavLink, useLocation } from 'react-router-dom'
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { useAuth } from '@/contexts/AuthContext'
 import {
   LayoutDashboard,
   Table2,
@@ -10,21 +12,39 @@ import {
   Database,
   Menu,
   X,
+  Users,
+  Shield,
+  LogOut,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
-
-const navItems = [
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/tables', label: 'Tables', icon: Table2 },
-  { to: '/servers', label: 'Servers', icon: Server },
-  { to: '/explorer', label: 'Data Explorer', icon: Terminal },
-  { to: '/logs', label: 'Logs', icon: ScrollText },
-]
 
 export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [healthStatus, setHealthStatus] = useState<'healthy' | 'unhealthy' | 'loading'>('loading')
   const location = useLocation()
+  const navigate = useNavigate()
+  const { user, isAdmin, logout } = useAuth()
+
+  // Filter nav items based on user role
+  const baseNavItems = [
+    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { to: '/tables', label: 'Tables', icon: Table2 },
+    { to: '/servers', label: 'Servers', icon: Server },
+    { to: '/explorer', label: 'Data Explorer', icon: Terminal },
+    { to: '/logs', label: 'Logs', icon: ScrollText },
+  ]
+
+  const adminNavItems = [
+    { to: '/users', label: 'Users', icon: Users },
+    { to: '/permissions', label: 'Permissions', icon: Shield },
+  ]
+
+  const navItems = isAdmin ? [...baseNavItems, ...adminNavItems] : baseNavItems
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login')
+  }
 
   useEffect(() => {
     const checkHealth = async () => {
@@ -107,7 +127,34 @@ export function Layout() {
           ))}
         </nav>
 
-        <div className="absolute bottom-0 left-0 right-0 border-t p-4">
+        <div className="absolute bottom-0 left-0 right-0 border-t p-4 space-y-3">
+          {/* User info */}
+          {user && (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="rounded-full bg-primary/10 p-1.5">
+                  <Users className="h-3 w-3 text-primary" />
+                </div>
+                <div>
+                  <p className="text-xs font-medium">{user.username}</p>
+                  <Badge variant={user.role === 'admin' ? 'default' : 'secondary'} className="text-[9px] px-1 py-0">
+                    {user.role}
+                  </Badge>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleLogout}
+                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                title="Logout"
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+          
+          {/* Health status */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div

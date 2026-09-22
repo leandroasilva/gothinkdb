@@ -15,7 +15,27 @@ GoThinkDB is a complete reimplementation of RethinkDB in Go, providing full API 
 
 ## Quick Start
 
-### Using Docker (Recommended)
+### Install Native (Recommended for Production)
+
+**macOS & Linux:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/leandroasilva/gothinkdb/main/scripts/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+iwr -useb https://raw.githubusercontent.com/leandroasilva/gothinkdb/main/scripts/install.ps1 | iex
+```
+
+**Start GoThinkDB:**
+```bash
+gothinkdb -data ~/.gothinkdb
+```
+
+**Access Dashboard:** http://localhost:8080  
+**Default Credentials:** admin / admin
+
+### Using Docker
 
 ```bash
 # Start single node
@@ -154,6 +174,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+## Testing
+
+GoThinkDB includes comprehensive test coverage across all components.
+
+### Core Database Tests
+
+```bash
+# Run all core tests
+go test ./internal/... ./pkg/...
+
+# Run specific module tests
+go test ./internal/btree/...      # B-Tree operations
+go test ./internal/reql/...       # Query evaluator
+go test ./internal/storage/...    # Storage engine
+go test ./internal/raft/...       # Raft consensus
+go test ./internal/rpc/...        # Cluster RPC
+go test ./pkg/datum/...           # Data types
+```
+
+### Driver Tests
+
+All drivers include comprehensive integration tests covering CRUD operations, aggregations, joins, indexes, connection pooling, and concurrent operations.
+
+**Go Driver (12 tests):**
+```bash
+cd drivers/go
+go test -tags integration -v
+```
+
+Tests: Database operations, Table operations, 1000+ record insertion, Multi-table CRUD, Filter/OrderBy/Limit/Skip, Aggregations (count/sum/avg/min/max/group), Index operations, Between queries, Projection (hasFields/without), Joins (inner/outer), Connection pool control, Concurrent pool operations.
+
+**TypeScript Driver (23 tests):**
+```bash
+cd drivers/typescript
+npm test
+```
+
+Same coverage as Go driver with additional edge cases.
+
+**Rust Driver (7 tests):**
+```bash
+cd drivers/rust
+cargo test --test integration_test
+```
+
+Tests: Database operations, Table operations, 1000+ record insertion, Multi-table CRUD, Filter/OrderBy/Limit/Skip, Aggregations, Connection pool control.
+
+### Test Coverage
+
+| Component | Test Files | Coverage |
+|-----------|-----------|----------|
+| B-Tree | 4 files | Insert, delete, search, split, multi-key |
+| Protocol | 1 file | Handshake, query parsing, response formatting |
+| ReQL Evaluator | 2 files | All term types, aggregations, joins |
+| Storage | 1 file | Block operations, serialization, page cache |
+| Raft | 5 files | Leader election, log replication, consistency |
+| RPC | 1 file | Cluster communication, health checks |
+| Datum | 1 file | Type conversions, comparisons |
+| Go Driver | 3 files | Unit + comprehensive integration |
+| TypeScript Driver | 3 files | Unit + comprehensive integration |
+| Rust Driver | 1 file | Comprehensive integration |
 
 ## Development
 
@@ -298,6 +380,53 @@ All core phases are complete:
 - [x] **Phase 10**: Consistency & replication
 - [x] **Phase 11**: Advanced features (geo, JS, etc)
 - [x] **Phase 12**: Dashboard, drivers & CLI tools
+
+## Installation
+
+### Docker
+
+```bash
+docker pull halklenson/gothinkdb:latest
+
+# Run standalone
+docker run -d --name gothinkdb \
+  -p 28015:28015 -p 8080:8080 -p 29015:29015 \
+  -v gothinkdb-data:/data/gothinkdb \
+  halklenson/gothinkdb:latest
+
+# Run cluster
+docker compose -f docker-compose.cluster.yml up -d
+```
+
+### Drivers
+
+| Language | Package | Install |
+|----------|---------|---------|
+| TypeScript/JavaScript | `gothinkdb-driver` | `npm install gothinkdb-driver` |
+| Rust | `gothinkdb` | `cargo add gothinkdb` |
+| Go | `drivers/go` | `go get github.com/leandroasilva/gothinkdb/drivers/go@latest` |
+
+### Binary Releases
+
+Download pre-built binaries from [GitHub Releases](https://github.com/leandroasilva/gothinkdb/releases):
+
+- `gothinkdb-linux-amd64` - Linux x86_64
+- `gothinkdb-linux-arm64` - Linux ARM64
+- `gothinkdb-darwin-amd64` - macOS Intel
+- `gothinkdb-darwin-arm64` - macOS Apple Silicon
+- `gothinkdb-windows-amd64.exe` - Windows x86_64
+
+## Automated Releases
+
+When a new release is published on GitHub, the following happens automatically:
+
+1. **Docker Image** - Built and pushed to `halklenson/gothinkdb:latest` and versioned tag
+2. **NPM Package** - TypeScript driver published to npmjs.com
+3. **Cargo Crate** - Rust driver published to crates.io
+4. **Go Binaries** - Pre-built binaries attached as release assets
+5. **Go Driver** - Tagged for `go get` installation
+
+See [.github/SECRETS.md](.github/SECRETS.md) for configuration details.
 
 ## Contributing
 

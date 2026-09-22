@@ -1,15 +1,15 @@
 import { Connection } from './connection';
 import { Response } from './types';
 
-// ReQL Term Types (matching RethinkDB protocol)
+// ReQL Term Types (matching GoThinkDB evaluator)
 const TermType = {
   DATUM: 1,
   MAKE_ARRAY: 2,
   MAKE_OBJ: 3,
-  VAR: 10,
-  DB: 14,
-  TABLE: 15,
-  GET: 16,
+  HAS_FIELDS: 33,
+  WITHOUT: 34,
+  MERGE: 36,
+  TABLE: 10,
   INSERT: 17,
   UPDATE: 18,
   DELETE: 19,
@@ -19,17 +19,13 @@ const TermType = {
   ORDER_BY: 41,
   LIMIT: 42,
   SKIP: 43,
-  GET_ALL: 78,
-  DB_CREATE: 57,
-  DB_DROP: 58,
-  DB_LIST: 59,
-  TABLE_CREATE: 60,
-  TABLE_DROP: 61,
-  TABLE_LIST: 62,
+  INNER_JOIN: 48,
+  OUTER_JOIN: 49,
+  GET: 70,
   INDEX_CREATE: 75,
   INDEX_DROP: 76,
   INDEX_LIST: 77,
-  CHANGES: 152,
+  GET_ALL: 78,
   COUNT: 86,
   SUM: 87,
   AVG: 88,
@@ -38,14 +34,17 @@ const TermType = {
   GROUP: 91,
   UNGROUP: 92,
   REDUCE: 93,
-  HAS_FIELDS: 33,
-  WITH_FIELDS: 96,
+  DB: 14,
+  DB_CREATE: 57,
+  DB_DROP: 58,
+  DB_LIST: 59,
+  TABLE_CREATE: 60,
+  TABLE_DROP: 61,
+  TABLE_LIST: 62,
+  CHANGES: 152,
+  BETWEEN: 172,
   PLUCK: 33,
-  WITHOUT: 34,
-  MERGE: 36,
-  BETWEEN: 182,
-  INNER_JOIN: 48,
-  OUTER_JOIN: 49,
+  WITH_FIELDS: 96,
 } as const;
 
 /**
@@ -69,7 +68,13 @@ export class QueryBuilder<T = unknown> {
       throw new Error('No connection provided. Pass a connection to run() or create queries from a connection.');
     }
     const response: Response<T> = await connection.query(this.term);
-    return response.data;
+    // The server wraps all responses in an array (RethinkDB convention).
+    // Unwrap single-element arrays.
+    const data = response.data;
+    if (Array.isArray(data) && data.length === 1) {
+      return data[0] as T;
+    }
+    return data;
   }
 
   /**
@@ -102,8 +107,8 @@ export class QueryBuilder<T = unknown> {
     return new QueryBuilder([TermType.SKIP, this.term, n], this.conn);
   }
 
-  between(lower: unknown, upper: unknown): QueryBuilder<T> {
-    return new QueryBuilder([TermType.BETWEEN, this.term, lower, upper], this.conn);
+  between(index: string, lower: unknown, upper: unknown): QueryBuilder<T> {
+    return new QueryBuilder([TermType.BETWEEN, this.term, index, lower, upper], this.conn);
   }
 
   pluck(...fields: string[]): QueryBuilder<T> {
@@ -191,9 +196,8 @@ export class QueryBuilder<T = unknown> {
  * Table reference
  */
 export class TableQuery<T = Record<string, unknown>> extends QueryBuilder<T[]> {
-  constructor(db: string | QueryBuilder, tableName: string, conn?: Connection) {
-    const dbTerm = typeof db === 'string' ? [TermType.DB, db] : db.toTerm();
-    super([TermType.TABLE, dbTerm, tableName], conn);
+  constructor(tableName: string, conn?: Connection) {
+    super([TermType.TABLE, tableName], conn);
   }
 
   get(id: string): QueryBuilder<T> {
@@ -242,15 +246,15 @@ export class DbQuery extends QueryBuilder {
   }
 
   table<T = Record<string, unknown>>(tableName: string): TableQuery<T> {
-    return new TableQuery<T>(this, tableName, this.conn);
+    return new TableQuery<T>(tableName, this.conn);
   }
 
   tableCreate(tableName: string): QueryBuilder<{ tables_created: number }> {
-    return new QueryBuilder([TermType.TABLE_CREATE, this.term, tableName], this.conn);
+    return new QueryBuilder([TermType.TABLE_CREATE, tableName, this.term], this.conn);
   }
 
   tableDrop(tableName: string): QueryBuilder<{ tables_dropped: number }> {
-    return new QueryBuilder([TermType.TABLE_DROP, this.term, tableName], this.conn);
+    return new QueryBuilder([TermType.TABLE_DROP, tableName, this.term], this.conn);
   }
 
   tableList(): QueryBuilder<string[]> {
@@ -272,9 +276,8 @@ export class R {
     return new DbQuery(name, this.conn);
   }
 
-  table<T = Record<string, unknown>>(tableName: string, db?: string): TableQuery<T> {
-    const dbName = db || 'test';
-    return new TableQuery<T>(dbName, tableName, this.conn);
+  table<T = Record<string, unknown>>(tableName: string, _db?: string): TableQuery<T> {
+    return new TableQuery<T>(tableName, this.conn);
   }
 
   dbCreate(name: string): QueryBuilder<{ dbs_created: number }> {

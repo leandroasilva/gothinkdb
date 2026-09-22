@@ -8,7 +8,7 @@ describe('QueryBuilder', () => {
     const query = r.table('users');
     expect(query).toBeInstanceOf(TableQuery);
     const term = query.toTerm();
-    expect(term).toEqual([15, [14, 'test'], 'users']);
+    expect(term).toEqual([10, 'users']);
   });
 
   it('should create a db query', () => {
@@ -53,7 +53,7 @@ describe('QueryBuilder', () => {
   it('should chain get', () => {
     const query = r.table('users').get('abc123');
     const term = query.toTerm();
-    expect(term[0]).toBe(16); // GET
+    expect(term[0]).toBe(70); // GET
     expect(term[2]).toBe('abc123');
   });
 

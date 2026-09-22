@@ -1,14 +1,17 @@
 # Docker Compose for GoThinkDB Cluster
-# Multi-node cluster configuration for testing
+# Multi-node cluster configuration
+#
+# Usage:
+#   docker compose -f docker-compose.cluster.yml up -d
+#
+# Or with custom image:
+#   DOCKERHUB_USER=halklenson docker compose -f docker-compose.cluster.yml up -d
 
 version: '3.8'
 
 services:
   gothinkdb-node1:
-    image: gothinkdb:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${DOCKERHUB_USER:-halklenson}/gothinkdb:${DOCKERHUB_TAG:-latest}
     container_name: gothinkdb-node1
     ports:
       - "28015:28015"
@@ -39,10 +42,7 @@ services:
       - gothinkdb-cluster
 
   gothinkdb-node2:
-    image: gothinkdb:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${DOCKERHUB_USER:-halklenson}/gothinkdb:${DOCKERHUB_TAG:-latest}
     container_name: gothinkdb-node2
     ports:
       - "28016:28015"
@@ -78,10 +78,7 @@ services:
       - gothinkdb-cluster
 
   gothinkdb-node3:
-    image: gothinkdb:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${DOCKERHUB_USER:-halklenson}/gothinkdb:${DOCKERHUB_TAG:-latest}
     container_name: gothinkdb-node3
     ports:
       - "28017:28015"

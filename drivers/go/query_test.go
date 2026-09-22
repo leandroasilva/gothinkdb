@@ -18,8 +18,8 @@ func TestTableQuery(t *testing.T) {
 		t.Fatal("Table returned nil")
 	}
 	term := q.ToTerm()
-	if len(term) != 3 {
-		t.Fatalf("expected 3 elements in term, got %d", len(term))
+	if len(term) != 2 {
+		t.Fatalf("expected 2 elements in term, got %d", len(term))
 	}
 	if term[0] != TermTable {
 		t.Errorf("expected term[0] = %d (TABLE), got %v", TermTable, term[0])
@@ -180,13 +180,12 @@ func TestUseDB(t *testing.T) {
 	r.Use("production")
 	q := r.Table("users")
 	term := q.ToTerm()
-	// term[1] should be [DB, "production"]
-	dbTerm, ok := term[1].([]interface{})
-	if !ok {
-		t.Fatalf("expected db term to be []interface{}, got %T", term[1])
+	// Table now just uses [TABLE, "users"] without DB reference
+	if term[0] != TermTable {
+		t.Errorf("expected TABLE term, got %v", term[0])
 	}
-	if dbTerm[1] != "production" {
-		t.Errorf("expected db 'production', got %v", dbTerm[1])
+	if term[1] != "users" {
+		t.Errorf("expected table 'users', got %v", term[1])
 	}
 }
 

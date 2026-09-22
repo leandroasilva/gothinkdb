@@ -7,7 +7,16 @@ import { Badge } from '@/components/ui/badge'
 import { Table2, Plus, Trash2, Database, ChevronRight } from 'lucide-react'
 
 async function fetchJSON(url: string, options?: RequestInit) {
-  const res = await fetch(url, options)
+  const token = localStorage.getItem('auth_token')
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  const res = await fetch(url, {
+    ...options,
+    headers: { ...headers, ...(options?.headers as Record<string, string>) },
+  })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }
@@ -15,7 +24,7 @@ async function fetchJSON(url: string, options?: RequestInit) {
 export function TablesPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const [selectedDb, setSelectedDb] = useState('test')
+  const [selectedDb, setSelectedDb] = useState('')
   const [showCreateDb, setShowCreateDb] = useState(false)
   const [showCreateTable, setShowCreateTable] = useState(false)
   const [newDbName, setNewDbName] = useState('')
@@ -26,9 +35,15 @@ export function TablesPage() {
     queryFn: () => fetchJSON('/api/databases'),
   })
 
+  const dbList = Array.isArray(databases) ? databases : []
+
+  // Auto-select first database when list loads
+  const effectiveDb = selectedDb || (dbList.length > 0 ? dbList[0] : '')
+
   const { data: tables, isLoading } = useQuery({
-    queryKey: ['tables', selectedDb],
-    queryFn: () => fetchJSON(`/api/tables?db=${selectedDb}`),
+    queryKey: ['tables', effectiveDb],
+    queryFn: () => fetchJSON(`/api/tables?db=${effectiveDb}`),
+    enabled: effectiveDb !== '',
   })
 
   const createDbMutation = useMutation({
@@ -47,9 +62,9 @@ export function TablesPage() {
 
   const createTableMutation = useMutation({
     mutationFn: (name: string) =>
-      fetchJSON(`/api/tables/${name}?db=${selectedDb}`, { method: 'POST' }),
+      fetchJSON(`/api/tables/${name}?db=${effectiveDb}`, { method: 'POST' }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tables', selectedDb] })
+      queryClient.invalidateQueries({ queryKey: ['tables', effectiveDb] })
       setShowCreateTable(false)
       setNewTableName('')
     },
@@ -57,9 +72,9 @@ export function TablesPage() {
 
   const dropTableMutation = useMutation({
     mutationFn: (name: string) =>
-      fetchJSON(`/api/tables/${name}?db=${selectedDb}`, { method: 'DELETE' }),
+      fetchJSON(`/api/tables/${name}?db=${effectiveDb}`, { method: 'DELETE' }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tables', selectedDb] })
+      queryClient.invalidateQueries({ queryKey: ['tables', effectiveDb] })
     },
   })
 
@@ -71,7 +86,6 @@ export function TablesPage() {
     },
   })
 
-  const dbList = Array.isArray(databases) ? databases : []
   const tableList = Array.isArray(tables) ? tables : []
 
   return (
@@ -102,10 +116,12 @@ export function TablesPage() {
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-2">
-            {dbList.map((db: string) => (
+            {dbList.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No databases yet. Create one to get started.</p>
+            ) : dbList.map((db: string) => (
               <Button
                 key={db}
-                variant={selectedDb === db ? 'default' : 'outline'}
+                variant={effectiveDb === db ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => setSelectedDb(db)}
               >
@@ -121,7 +137,7 @@ export function TablesPage() {
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
             <Table2 size={18} />
-            Tables in "{selectedDb}"
+            {effectiveDb ? `Tables in "${effectiveDb}"` : 'Select a database'}
             <Badge variant="secondary">{tableList.length}</Badge>
           </CardTitle>
         </CardHeader>
@@ -138,14 +154,14 @@ export function TablesPage() {
                 <div
                   key={table}
                   className="flex items-center justify-between rounded-lg border p-4 hover:bg-accent/50 transition-colors cursor-pointer"
-                  onClick={() => navigate(`/tables/${selectedDb}/${table}`)}
+                  onClick={() => navigate(`/tables/${effectiveDb}/${table}`)}
                 >
                   <div className="flex items-center gap-3">
                     <Table2 size={18} className="text-primary" />
                     <div>
                       <p className="font-medium">{table}</p>
                       <p className="text-xs text-muted-foreground">
-                        Database: {selectedDb}
+                        Database: {effectiveDb}
                       </p>
                     </div>
                   </div>
@@ -210,7 +226,7 @@ export function TablesPage() {
         <Card className="border-primary/50">
           <CardHeader>
             <CardTitle className="text-lg">
-              Create Table in "{selectedDb}"
+              Create Table in "{effectiveDb}"
             </CardTitle>
           </CardHeader>
           <CardContent>

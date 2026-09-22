@@ -1,0 +1,232 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  # ============================================
+  # Docker - Build & Push to DockerHub
+  # ============================================
+  docker:
+    name: Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            halklenson/gothinkdb:latest
+            halklenson/gothinkdb:${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Publish README to DockerHub
+        run: |
+          JWT=$(curl -s -X POST https://hub.docker.com/v2/users/login/ \
+            -H "Content-Type: application/json" \
+            -d '{"username": "${{ secrets.DOCKERHUB_USERNAME }}", "password": "${{ secrets.DOCKERHUB_TOKEN }}"}' \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+
+          curl -s -X PATCH "https://hub.docker.com/v2/repositories/halklenson/gothinkdb/" \
+            -H "Authorization: JWT ${JWT}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"description\": \"GoThinkDB - RethinkDB compatible database in Go\",
+              \"full_description\": $(python3 -c "import json; print(json.dumps(open('DOCKERHUB.md').read()))")
+            }"
+
+  # ============================================
+  # NPM - Publish TypeScript Driver
+  # ============================================
+  npm:
+    name: NPM Package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: drivers/typescript
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Update version from release
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version || true
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish to NPM
+        run: |
+          if [ -n "${{ secrets.NPM_OTP }}" ]; then
+            npm publish --access public --otp=${{ secrets.NPM_OTP }}
+          else
+            npm publish --access public
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ============================================
+  # Cargo - Publish Rust Driver
+  # ============================================
+  cargo:
+    name: Cargo Package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: drivers/rust
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Update version from release
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i "s/^version = .*/version = \"${VERSION}\"/" Cargo.toml
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Publish to crates.io
+        run: cargo publish --allow-dirty
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # ============================================
+  # Go - Build Binaries (install via GitHub)
+  # ============================================
+  go-binaries:
+    name: Go Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            ext: ""
+          - os: linux
+            arch: arm64
+            ext: ""
+          - os: darwin
+            arch: amd64
+            ext: ""
+          - os: darwin
+            arch: arm64
+            ext: ""
+          - os: windows
+            arch: amd64
+            ext: ".exe"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build dashboard
+        run: |
+          cd dashboard
+          npm ci
+          npm run build
+          cd ..
+          mkdir -p cmd/gothinkdb/dashboard
+          cp -r dashboard/dist/* cmd/gothinkdb/dashboard/
+
+      - name: Build binary
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build \
+            -ldflags="-s -w -X main.version=${VERSION}" \
+            -o gothinkdb-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} \
+            ./cmd/gothinkdb
+
+      - name: Upload binary to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: gothinkdb-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================
+  # Go Driver - Update go.mod version
+  # ============================================
+  go-driver:
+    name: Go Driver
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: drivers/go
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Create Go module tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "drivers/go/v${VERSION}" -m "Go driver v${VERSION}"
+          git push origin "drivers/go/v${VERSION}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

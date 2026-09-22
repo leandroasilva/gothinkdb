@@ -34,7 +34,31 @@ func (q *Query) Run(conn ...*Conn) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return resp.Data, nil
+	// The server wraps all responses in an array (RethinkDB convention).
+	// Unwrap: if data is a single-element array, return the inner element.
+	return unwrapResponse(resp.Data), nil
+}
+
+// unwrapResponse removes the outer array wrapper from server responses.
+func unwrapResponse(data json.RawMessage) json.RawMessage {
+	if len(data) == 0 {
+		return data
+	}
+	// Check if it's an array
+	trimmed := data[0]
+	if trimmed != '[' {
+		return data
+	}
+	// Try to parse as array
+	var arr []json.RawMessage
+	if err := json.Unmarshal(data, &arr); err != nil {
+		return data
+	}
+	// If single element, return it directly
+	if len(arr) == 1 {
+		return arr[0]
+	}
+	return data
 }
 
 // Run executes the query and decodes the result into the given value.
@@ -73,9 +97,9 @@ func (q *Query) Skip(n int) *Query {
 	return NewQuery([]interface{}{TermSkip, q.term, n}, q.conn)
 }
 
-// Between adds a between operation to the query.
-func (q *Query) Between(lower, upper interface{}) *Query {
-	return NewQuery([]interface{}{TermBetween, q.term, lower, upper}, q.conn)
+// Between adds a between operation to the query (requires index name).
+func (q *Query) Between(index string, lower, upper interface{}) *Query {
+	return NewQuery([]interface{}{TermBetween, q.term, index, lower, upper}, q.conn)
 }
 
 // Pluck selects specific fields from the result.
@@ -201,7 +225,7 @@ type TableQuery struct {
 
 // Table creates a new table query on a specific database.
 func (d *DbQuery) Table(name string) *TableQuery {
-	term := []interface{}{TermTable, d.term, name}
+	term := []interface{}{TermTable, name}
 	return &TableQuery{Query: NewQuery(term, d.conn)}
 }
 
@@ -250,12 +274,12 @@ type DbQuery struct {
 
 // TableCreate creates a new table in the database.
 func (d *DbQuery) TableCreate(name string) *Query {
-	return NewQuery([]interface{}{TermTableCreate, d.term, name}, d.conn)
+	return NewQuery([]interface{}{TermTableCreate, name, d.term}, d.conn)
 }
 
 // TableDrop drops a table from the database.
 func (d *DbQuery) TableDrop(name string) *Query {
-	return NewQuery([]interface{}{TermTableDrop, d.term, name}, d.conn)
+	return NewQuery([]interface{}{TermTableDrop, name, d.term}, d.conn)
 }
 
 // TableList lists all tables in the database.
@@ -297,11 +321,7 @@ func (r *R) DB(name string) *DbQuery {
 
 // Table returns a table reference using the default database.
 func (r *R) Table(name string) *TableQuery {
-	dbName := r.db
-	if dbName == "" {
-		dbName = "test"
-	}
-	term := []interface{}{TermTable, []interface{}{TermDB, dbName}, name}
+	term := []interface{}{TermTable, name}
 	return &TableQuery{Query: NewQuery(term, r.conn)}
 }
 
