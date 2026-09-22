@@ -225,7 +225,7 @@ type TableQuery struct {
 
 // Table creates a new table query on a specific database.
 func (d *DbQuery) Table(name string) *TableQuery {
-	term := []interface{}{TermTable, name}
+	term := []interface{}{TermTable, d.term, name}
 	return &TableQuery{Query: NewQuery(term, d.conn)}
 }
 

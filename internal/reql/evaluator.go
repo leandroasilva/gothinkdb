@@ -120,7 +120,7 @@ func (e *Evaluator) GetOrCreateTableDB(dbName, tableName string) *Table {
 		Indexes:     NewIndexManager(),
 		Changefeeds: make([]*Changefeed, 0),
 	}
-	e.tables[name] = table
+	db.Tables[tableName] = table
 	return table
 }
 
@@ -1046,6 +1046,27 @@ func (e *Evaluator) evalDBList(ctx context.Context, args []datum.Datum) (datum.D
 	return datum.NewArray(result), nil
 }
 
+// extractDBRef extracts the database name from a database reference datum.
+// The driver sends DB refs as arrays [14, "dbName"] (TermDB=14).
+func (e *Evaluator) extractDBRef(d datum.Datum) (string, bool) {
+	// Array format: [14, "dbName"] (TermDB = 14)
+	if d.Type() == datum.Array {
+		arr := d.Array()
+		if len(arr) >= 2 && arr[0].Type() == datum.Num && int(arr[0].Num()) == 14 {
+			return arr[1].Str(), true
+		}
+	}
+	// Object format: {"db": "dbName"}
+	if d.Type() == datum.Object {
+		if dbRef, ok := d.Object().Get("db"); ok {
+			if dbRef.Type() == datum.Str {
+				return dbRef.Str(), true
+			}
+		}
+	}
+	return "", false
+}
+
 // evalTableCreate creates a new table
 func (e *Evaluator) evalTableCreate(ctx context.Context, args []datum.Datum) (datum.Datum, error) {
 	if len(args) < 1 {
@@ -1057,16 +1078,11 @@ func (e *Evaluator) evalTableCreate(ctx context.Context, args []datum.Datum) (da
 		return datum.Datum{}, fmt.Errorf("table name must be a string")
 	}
 
-	// Default to "test" database if not specified
-	dbName := "test"
+	// Default to current database if not specified
+	dbName := e.currentDB
 	if len(args) > 1 {
-		// Check if second arg is a database reference
-		if args[1].Type() == datum.Object {
-			if dbRef, ok := args[1].Object().Get("db"); ok {
-				if dbRef.Type() == datum.Str {
-					dbName = dbRef.Str()
-				}
-			}
+		if name, ok := e.extractDBRef(args[1]); ok {
+			dbName = name
 		}
 	}
 
@@ -1074,8 +1090,8 @@ func (e *Evaluator) evalTableCreate(ctx context.Context, args []datum.Datum) (da
 		return datum.Datum{}, err
 	}
 
-	// Also create in evaluator's flat map so queries work immediately
-	e.GetOrCreateTable(tableName.Str())
+	// Also create in evaluator's admin map so queries work immediately
+	e.GetOrCreateTableDB(dbName, tableName.Str())
 
 	return datum.NewObject(datum.NewObjectDataFromMap(map[string]datum.Datum{
 		"tables_created": datum.NewNum(1),
@@ -1093,16 +1109,11 @@ func (e *Evaluator) evalTableDrop(ctx context.Context, args []datum.Datum) (datu
 		return datum.Datum{}, fmt.Errorf("table name must be a string")
 	}
 
-	// Default to "test" database if not specified
-	dbName := "test"
+	// Default to current database if not specified
+	dbName := e.currentDB
 	if len(args) > 1 {
-		// Check if second arg is a database reference
-		if args[1].Type() == datum.Object {
-			if dbRef, ok := args[1].Object().Get("db"); ok {
-				if dbRef.Type() == datum.Str {
-					dbName = dbRef.Str()
-				}
-			}
+		if name, ok := e.extractDBRef(args[1]); ok {
+			dbName = name
 		}
 	}
 
@@ -1117,16 +1128,11 @@ func (e *Evaluator) evalTableDrop(ctx context.Context, args []datum.Datum) (datu
 
 // evalTableList lists all tables in a database
 func (e *Evaluator) evalTableList(ctx context.Context, args []datum.Datum) (datum.Datum, error) {
-	// Default to "test" database if not specified
-	dbName := "test"
+	// Default to current database if not specified
+	dbName := e.currentDB
 	if len(args) > 0 {
-		// Check if arg is a database reference
-		if args[0].Type() == datum.Object {
-			if dbRef, ok := args[0].Object().Get("db"); ok {
-				if dbRef.Type() == datum.Str {
-					dbName = dbRef.Str()
-				}
-			}
+		if name, ok := e.extractDBRef(args[0]); ok {
+			dbName = name
 		}
 	}
 

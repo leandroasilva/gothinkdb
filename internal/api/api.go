@@ -383,16 +383,6 @@ func (s *Server) handleTables(w http.ResponseWriter, r *http.Request) {
 		dbName = "test"
 	}
 
-	// Check database permission for non-admin users
-	user, _ := auth.UserFromContext(r.Context())
-	if user != nil && !user.IsAdmin() {
-		if !s.auth.GetStore().HasDatabaseAccess(user.ID, dbName, true, false, false, false) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permissions for database: " + dbName})
-			return
-		}
-	}
-
-	// Get tables from admin manager for the specific database
 	tables, err := s.evaluator.GetAdmin().ListTables(dbName)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -418,37 +408,11 @@ func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
 	// Check if this is a /api/tables/{db}/{table}/docs or /api/tables/{db}/{table}/indexes request
 	parts := splitPath(path)
 	if len(parts) == 3 && (parts[2] == "docs" || parts[2] == "indexes") {
-		// /api/tables/{db}/{table}/{docs|indexes}
 		actualDB := parts[0]
 		tableName := parts[1]
 		subResource := parts[2]
 
 		table, err := s.evaluator.GetAdmin().GetTable(actualDB, tableName)
-	// Check database permission for non-admin users
-	user, _ := auth.UserFromContext(r.Context())
-	if user != nil && !user.IsAdmin() {
-		switch r.Method {
-		case http.MethodGet:
-			if !s.auth.GetStore().HasDatabaseAccess(user.ID, dbName, true, false, false, false) {
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permissions for database: " + dbName})
-				return
-			}
-		case http.MethodPost:
-			if !s.auth.GetStore().HasDatabaseAccess(user.ID, dbName, false, false, true, false) {
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permissions for database: " + dbName})
-				return
-			}
-		case http.MethodDelete:
-			if !s.auth.GetStore().HasDatabaseAccess(user.ID, dbName, false, false, false, true) {
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permissions for database: " + dbName})
-				return
-			}
-		}
-	}
-
-	switch r.Method {
-	case http.MethodGet:
-		table, err := s.evaluator.GetAdmin().GetTable(dbName, name)
 		if err != nil {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 			return
@@ -472,7 +436,7 @@ func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Single-segment or two-segment path: /api/tables/{name}?db={db}
+	// Single-segment path: /api/tables/{name}?db={db}
 	tableName := parts[0]
 
 	switch r.Method {
@@ -495,27 +459,12 @@ func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
 		}
-		// Create in evaluator's flat map and sync the reference
-		table := s.evaluator.GetOrCreateTable(name)
-		s.evaluator.GetAdmin().SyncTableRef(dbName, name, table)
-		user, _ := auth.UserFromContext(r.Context())
-		username := "unknown"
-		if user != nil {
-			username = user.Username
-		}
-		s.RecordLog("info", fmt.Sprintf("Table '%s' created in database '%s' by user '%s'", name, dbName, username))
 		writeJSON(w, http.StatusCreated, map[string]string{"status": "created"})
 	case http.MethodDelete:
 		if err := s.evaluator.GetAdmin().DropTable(dbName, tableName); err != nil {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 			return
 		}
-		user, _ := auth.UserFromContext(r.Context())
-		username := "unknown"
-		if user != nil {
-			username = user.Username
-		}
-		s.RecordLog("info", fmt.Sprintf("Table '%s' dropped from database '%s' by user '%s'", name, dbName, username))
 		writeJSON(w, http.StatusOK, map[string]string{"status": "dropped"})
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -623,7 +572,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Convert datum result to interface{}
-	responseData := datumToInterface(result)
+	responseData, _ := datumToInterface(result)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status": "success",
 		"result": responseData,
@@ -689,46 +638,5 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		slog.Error("failed to encode JSON response", "error", err)
-	}
-}
-
-// datumToInterface converts a datum.Datum to interface{} for JSON serialization
-func datumToInterface(d datum.Datum) interface{} {
-	switch d.Type() {
-	case datum.Null:
-		return nil
-	case datum.Bool:
-		return d.Bool()
-	case datum.Num:
-		return d.Num()
-	case datum.Str:
-		return d.Str()
-	case datum.Array:
-		arr := d.Array()
-		result := make([]interface{}, len(arr))
-		for i, item := range arr {
-			result[i] = datumToInterface(item)
-		}
-		return result
-	case datum.Object:
-		obj := d.Object()
-		result := make(map[string]interface{})
-		for _, key := range obj.Keys() {
-			val, _ := obj.Get(key)
-			result[key] = datumToInterface(val)
-		}
-		return result
-	case datum.Binary:
-		return d.Binary()
-	case datum.Time:
-		return d.Time()
-	case datum.Geometry:
-		return d.Geometry()
-	case datum.MinVal:
-		return map[string]interface{}{"$reql_type$": "MINVAL"}
-	case datum.MaxVal:
-		return map[string]interface{}{"$reql_type$": "MAXVAL"}
-	default:
-		return nil
 	}
 }

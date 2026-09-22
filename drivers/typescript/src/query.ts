@@ -196,8 +196,12 @@ export class QueryBuilder<T = unknown> {
  * Table reference
  */
 export class TableQuery<T = Record<string, unknown>> extends QueryBuilder<T[]> {
-  constructor(tableName: string, conn?: Connection) {
-    super([TermType.TABLE, tableName], conn);
+  constructor(tableName: string, conn?: Connection, dbTerm?: any[]) {
+    if (dbTerm) {
+      super([TermType.TABLE, dbTerm, tableName], conn);
+    } else {
+      super([TermType.TABLE, tableName], conn);
+    }
   }
 
   get(id: string): QueryBuilder<T> {
@@ -246,7 +250,7 @@ export class DbQuery extends QueryBuilder {
   }
 
   table<T = Record<string, unknown>>(tableName: string): TableQuery<T> {
-    return new TableQuery<T>(tableName, this.conn);
+    return new TableQuery<T>(tableName, this.conn, this.term);
   }
 
   tableCreate(tableName: string): QueryBuilder<{ tables_created: number }> {
