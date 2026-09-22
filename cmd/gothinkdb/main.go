@@ -141,8 +141,8 @@ func main() {
 		}
 	}()
 
-	// Start protocol server (ReQL)
-	handler := protocol.NewReQLHandler()
+	// Start protocol server (ReQL) - share the same evaluator as the API server
+	handler := protocol.NewReQLHandler(evaluator)
 	protocolServer := protocol.NewServer(cfg.DriverAddress, handler)
 	if err := protocolServer.Start(); err != nil {
 		slog.Error("failed to start protocol server", "error", err)

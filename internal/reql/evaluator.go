@@ -10,8 +10,9 @@ import (
 )
 
 type Evaluator struct {
-	tables map[string]*Table
-	admin  *AdminManager
+	tables    map[string]*Table // legacy flat map, kept for backward compat
+	admin     *AdminManager
+	currentDB string // current database name (default "test")
 }
 
 type Table struct {
@@ -22,10 +23,40 @@ type Table struct {
 	mu          sync.RWMutex
 }
 
+// RLock locks the table for reading
+func (t *Table) RLock() { t.mu.RLock() }
+
+// RUnlock unlocks the table for reading
+func (t *Table) RUnlock() { t.mu.RUnlock() }
+
+// DocCount returns the number of documents in the table
+func (t *Table) DocCount() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return len(t.Data)
+}
+
+// AllDocs returns all documents as a slice
+func (t *Table) AllDocs() []datum.Datum {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	docs := make([]datum.Datum, 0, len(t.Data))
+	for _, doc := range t.Data {
+		docs = append(docs, doc)
+	}
+	return docs
+}
+
+// IndexNames returns the list of index names
+func (t *Table) IndexNames() []string {
+	return t.Indexes.ListIndexes()
+}
+
 func NewEvaluator() *Evaluator {
 	return &Evaluator{
-		tables: make(map[string]*Table),
-		admin:  NewAdminManager(),
+		tables:    make(map[string]*Table),
+		admin:     NewAdminManager(),
+		currentDB: "test",
 	}
 }
 
@@ -34,18 +65,57 @@ func (e *Evaluator) GetAdmin() *AdminManager {
 	return e.admin
 }
 
-func (e *Evaluator) GetOrCreateTable(name string) *Table {
-	if table, ok := e.tables[name]; ok {
+// GetCurrentDB returns the current database name
+func (e *Evaluator) GetCurrentDB() string {
+	return e.currentDB
+}
+
+// SetCurrentDB sets the current database name
+func (e *Evaluator) SetCurrentDB(name string) {
+	e.currentDB = name
+}
+
+// GetOrCreateTableDB looks up or creates a table in the specified database via the admin manager.
+// This ensures the dashboard API and the ReQL protocol share the same table instances.
+func (e *Evaluator) GetOrCreateTableDB(dbName, tableName string) *Table {
+	// Ensure database exists
+	e.admin.mu.RLock()
+	db, exists := e.admin.databases[dbName]
+	e.admin.mu.RUnlock()
+	if !exists {
+		// Auto-create database (like RethinkDB does)
+		_ = e.admin.CreateDatabase(dbName)
+		e.admin.mu.RLock()
+		db = e.admin.databases[dbName]
+		e.admin.mu.RUnlock()
+	}
+
+	db.mu.RLock()
+	table, tableExists := db.Tables[tableName]
+	db.mu.RUnlock()
+	if tableExists {
 		return table
 	}
-	table := &Table{
-		Name:        name,
+
+	// Auto-create table in admin (like RethinkDB does)
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	// Double-check after acquiring write lock
+	if table, tableExists = db.Tables[tableName]; tableExists {
+		return table
+	}
+	table = &Table{
+		Name:        tableName,
 		Data:        make(map[string]datum.Datum),
 		Indexes:     NewIndexManager(),
 		Changefeeds: make([]*Changefeed, 0),
 	}
-	e.tables[name] = table
+	db.Tables[tableName] = table
 	return table
+}
+
+func (e *Evaluator) GetOrCreateTable(name string) *Table {
+	return e.GetOrCreateTableDB(e.currentDB, name)
 }
 
 func (e *Evaluator) Evaluate(ctx context.Context, query interface{}) (datum.Datum, error) {
@@ -701,7 +771,16 @@ func (e *Evaluator) evalChanges(ctx context.Context, args []datum.Datum) (datum.
 
 // notifyChangefeeds notifies all changefeeds of a change
 func (e *Evaluator) notifyChangefeeds(tableName string, oldDoc, newDoc datum.Datum) {
-	table, ok := e.tables[tableName]
+	// Look up table through admin manager in current database
+	e.admin.mu.RLock()
+	db, exists := e.admin.databases[e.currentDB]
+	e.admin.mu.RUnlock()
+	if !exists {
+		return
+	}
+	db.mu.RLock()
+	table, ok := db.Tables[tableName]
+	db.mu.RUnlock()
 	if !ok {
 		return
 	}

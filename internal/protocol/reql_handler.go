@@ -13,10 +13,10 @@ type ReQLHandler struct {
 	evaluator *reql.Evaluator
 }
 
-// NewReQLHandler creates a new ReQL handler
-func NewReQLHandler() *ReQLHandler {
+// NewReQLHandler creates a new ReQL handler with a shared evaluator
+func NewReQLHandler(evaluator *reql.Evaluator) *ReQLHandler {
 	return &ReQLHandler{
-		evaluator: reql.NewEvaluator(),
+		evaluator: evaluator,
 	}
 }
 
