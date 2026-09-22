@@ -559,6 +559,9 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	// Record query for metrics
 	s.RecordQuery()
 
+	// Set default database to widgettrace for Data Explorer
+	s.evaluator.SetCurrentDB("widgettrace")
+
 	// If query is a string, parse it as a ReQL expression
 	queryArg := req.Query
 	if queryStr, ok := queryArg.(string); ok {
@@ -589,6 +592,29 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 
 	// Convert datum result to interface{}
 	responseData, _ := datumToInterface(result)
+
+	// If result is a table reference, fetch all documents
+	if respMap, ok := responseData.(map[string]interface{}); ok {
+		if reqlType, ok := respMap["$reql_type$"].(string); ok && reqlType == "TABLE" {
+			tableName, _ := respMap["table"].(string)
+			dbName, _ := respMap["db"].(string)
+			if dbName == "" {
+				dbName = "test"
+			}
+			table, err := s.evaluator.GetAdmin().GetTable(dbName, tableName)
+			if err == nil {
+				docs := make([]interface{}, 0)
+				for _, doc := range table.AllDocs() {
+					converted, err := datumToInterface(doc)
+					if err == nil {
+						docs = append(docs, converted)
+					}
+				}
+				responseData = docs
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status": "success",
 		"result": responseData,
