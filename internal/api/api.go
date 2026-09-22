@@ -559,8 +559,24 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	// Record query for metrics
 	s.RecordQuery()
 
+	// If query is a string, parse it as a ReQL expression
+	queryArg := req.Query
+	if queryStr, ok := queryArg.(string); ok {
+		parsed, err := reql.ParseReQL(queryStr)
+		if err != nil {
+			slog.Error("query parse failed", "error", err)
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"status": "error",
+				"result": nil,
+				"error":  fmt.Sprintf("parse error: %v", err),
+			})
+			return
+		}
+		queryArg = parsed
+	}
+
 	// Execute query using the ReQL evaluator
-	result, err := s.evaluator.Evaluate(r.Context(), req.Query)
+	result, err := s.evaluator.Evaluate(r.Context(), queryArg)
 	if err != nil {
 		slog.Error("query execution failed", "error", err)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
