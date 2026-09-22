@@ -5,23 +5,27 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table2, Plus, Trash2, Database, ChevronRight } from 'lucide-react'
+import { useAuth } from '@/contexts/AuthContext'
 
-async function fetchJSON(url: string, options?: RequestInit) {
-  const token = localStorage.getItem('auth_token')
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+function makeFetchJSON(token: string | null) {
+  return async (url: string, options?: RequestInit) => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (token) headers['Authorization'] = `Bearer ${token}`
+
+    const res = await fetch(url, {
+      ...options,
+      headers: { ...headers, ...(options?.headers as Record<string, string>) },
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    return res.json()
   }
-  if (token) headers['Authorization'] = `Bearer ${token}`
-
-  const res = await fetch(url, {
-    ...options,
-    headers: { ...headers, ...(options?.headers as Record<string, string>) },
-  })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json()
 }
 
 export function TablesPage() {
+  const { token } = useAuth()
+  const fetchJSON = makeFetchJSON(token)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [selectedDb, setSelectedDb] = useState('')

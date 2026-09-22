@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Play, History, Trash2, Copy, Download } from 'lucide-react'
+import { useAuth } from '@/contexts/AuthContext'
 
 interface QueryResult {
   status: string
@@ -17,6 +18,7 @@ interface HistoryItem {
 }
 
 export function ExplorerPage() {
+  const { token } = useAuth()
   const [query, setQuery] = useState('r.table("test")')
   const [result, setResult] = useState<QueryResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -25,11 +27,18 @@ export function ExplorerPage() {
 
   const executeQuery = useCallback(async () => {
     if (!query.trim()) return
+    if (!token) {
+      setResult({
+        status: 'error',
+        result: null,
+        error: 'Not authenticated. Please login again.',
+      })
+      return
+    }
     setLoading(true)
     try {
-      const token = localStorage.getItem('auth_token')
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-      if (token) headers['Authorization'] = `Bearer ${token}`
+      headers['Authorization'] = `Bearer ${token}`
 
       const res = await fetch('/api/query', {
         method: 'POST',

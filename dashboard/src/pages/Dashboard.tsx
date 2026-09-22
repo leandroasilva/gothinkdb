@@ -21,39 +21,40 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts'
-
-async function fetchJSON(url: string) {
-  const token = localStorage.getItem('auth_token')
-  const headers: Record<string, string> = {}
-  if (token) headers['Authorization'] = `Bearer ${token}`
-  const res = await fetch(url, { headers })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json()
-}
+import { useAuth } from '@/contexts/AuthContext'
 
 export function DashboardPage() {
   const navigate = useNavigate()
+  const { token } = useAuth()
+
+  const fetchJSON = async (url: string) => {
+    const headers: Record<string, string> = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    const res = await fetch(url, { headers })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    return res.json()
+  }
 
   const { data: health } = useQuery({
-    queryKey: ['health'],
+    queryKey: ['health', token],
     queryFn: () => fetchJSON('/api/health'),
     refetchInterval: 5000,
   })
 
   const { data: serverInfo } = useQuery({
-    queryKey: ['serverInfo'],
+    queryKey: ['serverInfo', token],
     queryFn: () => fetchJSON('/api/server/info'),
     refetchInterval: 5000,
   })
 
   const { data: serverStats } = useQuery({
-    queryKey: ['serverStats'],
+    queryKey: ['serverStats', token],
     queryFn: () => fetchJSON('/api/server/stats'),
     refetchInterval: 2000,
   })
 
   const { data: databases } = useQuery({
-    queryKey: ['databases'],
+    queryKey: ['databases', token],
     queryFn: () => fetchJSON('/api/databases'),
     refetchInterval: 5000,
   })
