@@ -248,17 +248,28 @@ func (e *Evaluator) evalArg(ctx context.Context, arg datum.Datum) (datum.Datum, 
 }
 
 func (e *Evaluator) evalTable(ctx context.Context, args []datum.Datum) (datum.Datum, error) {
-	if len(args) == 0 || args[0].Type() != datum.Str {
+	var dbName string
+	var tableName string
+
+	if len(args) >= 2 && args[0].Type() == datum.Array {
+		dbArr := args[0].Array()
+		if len(dbArr) >= 2 && dbArr[0].Type() == datum.Num && int(dbArr[0].Num()) == 14 {
+			dbName = dbArr[1].Str()
+		}
+		tableName = args[1].Str()
+	} else if len(args) >= 1 && args[0].Type() == datum.Str {
+		tableName = args[0].Str()
+		dbName = e.currentDB
+	} else {
 		return datum.Datum{}, fmt.Errorf("TABLE requires table name")
 	}
 
-	tableName := args[0].Str()
-	e.GetOrCreateTable(tableName)
+	e.GetOrCreateTableDB(dbName, tableName)
 
-	// Return a table reference
 	obj := datum.NewObjectDataFromMap(map[string]datum.Datum{
 		"$reql_type$": datum.NewStr("TABLE"),
 		"table":       datum.NewStr(tableName),
+		"db":          datum.NewStr(dbName),
 	})
 	return datum.NewObject(obj), nil
 }
@@ -273,12 +284,12 @@ func (e *Evaluator) evalInsert(ctx context.Context, args []datum.Datum) (datum.D
 		return datum.Datum{}, err
 	}
 
-	tableName, ok := e.getTableName(tableRef)
+	dbName, tableName, ok := e.getTableDBAndName(tableRef)
 	if !ok {
 		return datum.Datum{}, fmt.Errorf("invalid table reference")
 	}
 
-	table := e.GetOrCreateTable(tableName)
+	table := e.GetOrCreateTableDB(dbName, tableName)
 
 	doc, err := e.evalArg(ctx, args[1])
 	if err != nil {
@@ -315,12 +326,12 @@ func (e *Evaluator) evalGet(ctx context.Context, args []datum.Datum) (datum.Datu
 		return datum.Datum{}, err
 	}
 
-	tableName, ok := e.getTableName(tableRef)
+	dbName, tableName, ok := e.getTableDBAndName(tableRef)
 	if !ok {
 		return datum.Datum{}, fmt.Errorf("invalid table reference")
 	}
 
-	table := e.GetOrCreateTable(tableName)
+	table := e.GetOrCreateTableDB(dbName, tableName)
 
 	keyDatum := args[1]
 	if keyDatum.Type() != datum.Str {
@@ -377,8 +388,8 @@ func (e *Evaluator) evalUpdate(ctx context.Context, args []datum.Datum) (datum.D
 	}
 
 	// Handle table reference (update all documents)
-	if tableName, ok := e.getTableName(selection); ok {
-		table := e.GetOrCreateTable(tableName)
+	if dbName, tableName, ok := e.getTableDBAndName(selection); ok {
+		table := e.GetOrCreateTableDB(dbName, tableName)
 		count := 0
 		for id, doc := range table.Data {
 			if doc.Type() == datum.Object {
@@ -452,8 +463,8 @@ func (e *Evaluator) evalDelete(ctx context.Context, args []datum.Datum) (datum.D
 	}
 
 	// Handle table reference (delete all documents)
-	if tableName, ok := e.getTableName(selection); ok {
-		table := e.GetOrCreateTable(tableName)
+	if dbName, tableName, ok := e.getTableDBAndName(selection); ok {
+		table := e.GetOrCreateTableDB(dbName, tableName)
 		count := len(table.Data)
 		table.Data = make(map[string]datum.Datum)
 		return datum.NewObject(datum.NewObjectDataFromMap(map[string]datum.Datum{
@@ -504,8 +515,8 @@ func (e *Evaluator) evalReplace(ctx context.Context, args []datum.Datum) (datum.
 	}
 
 	// Handle table reference (replace all documents)
-	if tableName, ok := e.getTableName(selection); ok {
-		table := e.GetOrCreateTable(tableName)
+	if dbName, tableName, ok := e.getTableDBAndName(selection); ok {
+		table := e.GetOrCreateTableDB(dbName, tableName)
 		count := 0
 		for id := range table.Data {
 			table.Data[id] = replacement
