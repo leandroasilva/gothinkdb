@@ -357,6 +357,23 @@ func (e *Evaluator) getTableName(tableRef datum.Datum) (string, bool) {
 	return tableNameDatum.Str(), true
 }
 
+// getTableDBAndName extracts both database and table name from a table reference
+func (e *Evaluator) getTableDBAndName(tableRef datum.Datum) (string, string, bool) {
+	if tableRef.Type() != datum.Object {
+		return "", "", false
+	}
+	obj := tableRef.Object()
+	tableNameDatum, ok := obj.Get("table")
+	if !ok || tableNameDatum.Type() != datum.Str {
+		return "", "", false
+	}
+	dbName := e.currentDB
+	if dbDatum, dbOk := obj.Get("db"); dbOk && dbDatum.Type() == datum.Str {
+		dbName = dbDatum.Str()
+	}
+	return dbName, tableNameDatum.Str(), true
+}
+
 func (e *Evaluator) ExecuteJSON(ctx context.Context, queryJSON []byte) ([]byte, error) {
 	var query interface{}
 	if err := json.Unmarshal(queryJSON, &query); err != nil {
@@ -792,7 +809,7 @@ func (e *Evaluator) evalIndexCreate(ctx context.Context, args []datum.Datum) (da
 		return datum.Datum{}, err
 	}
 
-	tableName, ok := e.getTableName(tableRef)
+	dbName, tableName, ok := e.getTableDBAndName(tableRef)
 	if !ok {
 		return datum.Datum{}, fmt.Errorf("invalid table reference")
 	}
@@ -807,7 +824,7 @@ func (e *Evaluator) evalIndexCreate(ctx context.Context, args []datum.Datum) (da
 		return datum.Datum{}, fmt.Errorf("field name must be a string")
 	}
 
-	table := e.GetOrCreateTable(tableName)
+	table := e.GetOrCreateTableDB(dbName, tableName)
 	if err := table.Indexes.CreateIndex(indexName.Str(), fieldName.Str()); err != nil {
 		return datum.Datum{}, err
 	}
@@ -833,7 +850,7 @@ func (e *Evaluator) evalIndexDrop(ctx context.Context, args []datum.Datum) (datu
 		return datum.Datum{}, err
 	}
 
-	tableName, ok := e.getTableName(tableRef)
+	dbName, tableName, ok := e.getTableDBAndName(tableRef)
 	if !ok {
 		return datum.Datum{}, fmt.Errorf("invalid table reference")
 	}
@@ -843,7 +860,7 @@ func (e *Evaluator) evalIndexDrop(ctx context.Context, args []datum.Datum) (datu
 		return datum.Datum{}, fmt.Errorf("index name must be a string")
 	}
 
-	table := e.GetOrCreateTable(tableName)
+	table := e.GetOrCreateTableDB(dbName, tableName)
 	if err := table.Indexes.DropIndex(indexName.Str()); err != nil {
 		return datum.Datum{}, err
 	}
@@ -891,7 +908,7 @@ func (e *Evaluator) evalBetween(ctx context.Context, args []datum.Datum) (datum.
 		return datum.Datum{}, err
 	}
 
-	tableName, ok := e.getTableName(tableRef)
+	dbName, tableName, ok := e.getTableDBAndName(tableRef)
 	if !ok {
 		return datum.Datum{}, fmt.Errorf("invalid table reference")
 	}
@@ -904,7 +921,7 @@ func (e *Evaluator) evalBetween(ctx context.Context, args []datum.Datum) (datum.
 	lower := args[2]
 	upper := args[3]
 
-	table := e.GetOrCreateTable(tableName)
+	table := e.GetOrCreateTableDB(dbName, tableName)
 	idx, exists := table.Indexes.GetIndex(indexName.Str())
 	if !exists {
 		return datum.Datum{}, fmt.Errorf("index %s does not exist", indexName.Str())
@@ -935,12 +952,12 @@ func (e *Evaluator) evalChanges(ctx context.Context, args []datum.Datum) (datum.
 		return datum.Datum{}, err
 	}
 
-	tableName, ok := e.getTableName(tableRef)
+	dbName, tableName, ok := e.getTableDBAndName(tableRef)
 	if !ok {
 		return datum.Datum{}, fmt.Errorf("invalid table reference")
 	}
 
-	table := e.GetOrCreateTable(tableName)
+	table := e.GetOrCreateTableDB(dbName, tableName)
 	cf := NewChangefeed(tableName)
 	table.Changefeeds = append(table.Changefeeds, cf)
 
