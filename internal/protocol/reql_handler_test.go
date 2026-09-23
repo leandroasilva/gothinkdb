@@ -4,11 +4,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/leandroasilva/gothinkdb/internal/reql"
 	"github.com/leandroasilva/gothinkdb/pkg/datum"
 )
 
 func TestReQLHandler_HandleQuery(t *testing.T) {
-	handler := NewReQLHandler()
+	handler := NewReQLHandler(reql.NewEvaluator())
 	ctx := context.Background()
 
 	// Test TABLE query
@@ -33,7 +34,7 @@ func TestReQLHandler_HandleQuery(t *testing.T) {
 }
 
 func TestReQLHandler_InsertAndGet(t *testing.T) {
-	handler := NewReQLHandler()
+	handler := NewReQLHandler(reql.NewEvaluator())
 	ctx := context.Background()
 
 	// Insert document

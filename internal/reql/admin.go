@@ -218,6 +218,39 @@ func (am *AdminManager) GetTable(dbName, tableName string) (*Table, error) {
 	return table, nil
 }
 
+// DatabaseSizeBytes returns the approximate on-memory size of a database by
+// summing the JSON-encoded length of every document in every table (plus the
+// document key). It is used by the HTTP API to report per-database usage for
+// quota enforcement; the value is an approximation, not a precise disk footprint.
+func (am *AdminManager) DatabaseSizeBytes(dbName string) (int64, error) {
+	am.mu.RLock()
+	db, exists := am.databases[dbName]
+	am.mu.RUnlock()
+	if !exists {
+		return 0, fmt.Errorf("database %s does not exist", dbName)
+	}
+
+	db.mu.RLock()
+	tables := make([]*Table, 0, len(db.Tables))
+	for _, t := range db.Tables {
+		tables = append(tables, t)
+	}
+	db.mu.RUnlock()
+
+	var total int64
+	for _, t := range tables {
+		t.RLock()
+		for key, doc := range t.Data {
+			total += int64(len(key))
+			if b, err := doc.MarshalJSON(); err == nil {
+				total += int64(len(b))
+			}
+		}
+		t.RUnlock()
+	}
+	return total, nil
+}
+
 // GetConfig gets server configuration
 func (am *AdminManager) GetConfig() map[string]interface{} {
 	am.mu.RLock()

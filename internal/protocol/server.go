@@ -10,6 +10,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/leandroasilva/gothinkdb/internal/auth"
+	"github.com/leandroasilva/gothinkdb/internal/reql"
 )
 
 // Server represents the ReQL protocol server
@@ -17,6 +20,7 @@ type Server struct {
 	listener      net.Listener
 	addr          string
 	handler       QueryHandler
+	store         *auth.Store
 	quit          chan struct{}
 	wg            sync.WaitGroup
 	connCount     atomic.Int64
@@ -29,11 +33,14 @@ type QueryHandler interface {
 	HandleQuery(ctx context.Context, conn *Connection, query *Query) (*Response, error)
 }
 
-// NewServer creates a new protocol server
-func NewServer(addr string, handler QueryHandler) *Server {
+// NewServer creates a new protocol server. The auth store is used to
+// authenticate driver connections (SCRAM-SHA-256) and to enforce per-database
+// permissions on every query.
+func NewServer(addr string, handler QueryHandler, store *auth.Store) *Server {
 	return &Server{
 		addr:          addr,
 		handler:       handler,
+		store:         store,
 		quit:          make(chan struct{}),
 		serverVersion: "0.1.0",
 	}
@@ -182,78 +189,102 @@ func (s *Server) handshakeV1_0(conn *Connection) error {
 		return fmt.Errorf("unsupported authentication_method: %s", authMethod)
 	}
 
-	// For now, accept all authentication (simplified)
-	// In production, this would implement full SCRAM-SHA-256
-	authResponse := map[string]interface{}{
-		"success":        true,
-		"authentication": "", // SCRAM challenge would go here
+	// client-first-message: "n,,n=<user>,r=<client-nonce>"
+	clientFirst, _ := clientMsg["authentication"].(string)
+	if clientFirst == "" {
+		return s.authError(conn, "missing SCRAM client-first message")
+	}
+	username, clientNonce, clientFirstBare, err := auth.ParseClientFirst(clientFirst)
+	if err != nil {
+		return s.authError(conn, err.Error())
+	}
+	if s.store == nil {
+		return s.authError(conn, "authentication not configured")
+	}
+	user, found := s.store.GetUserByUsername(username)
+	if !found {
+		// Do not reveal whether the user exists; use a generic failure.
+		return s.authError(conn, "invalid username or password")
+	}
+	scram, err := auth.NewSCRAMServer(user, clientFirstBare, clientNonce)
+	if err != nil {
+		return s.authError(conn, "invalid username or password")
 	}
 
+	// server-first-message: "r=<combined-nonce>,s=<salt>,i=<iterations>"
+	authResponse := map[string]interface{}{
+		"success":        true,
+		"authentication": scram.ServerFirst(),
+	}
 	if err := conn.WriteDatum(authResponse); err != nil {
 		return fmt.Errorf("failed to send auth response: %w", err)
 	}
 
-	// Step 3: Client sends final authentication message
-	clientFinal, err := conn.ReadDatum()
+	// client-final-message: "c=biws,r=<combined-nonce>,p=<proof>"
+	clientFinalMsg, err := conn.ReadDatum()
 	if err != nil {
 		return fmt.Errorf("failed to read client final auth: %w", err)
 	}
-
-	_ = clientFinal // Would validate SCRAM response
-
-	// Step 4: Server sends final success response
-	finalResponse := map[string]interface{}{
-		"success":        true,
-		"authentication": "", // SCRAM server final would go here
+	clientFinal, _ := clientFinalMsg["authentication"].(string)
+	serverFinal, err := scram.VerifyClientFinal(clientFinal)
+	if err != nil {
+		return s.authError(conn, "invalid username or password")
 	}
 
+	// server-final-message: "v=<server-signature>"
+	finalResponse := map[string]interface{}{
+		"success":        true,
+		"authentication": serverFinal,
+	}
 	if err := conn.WriteDatum(finalResponse); err != nil {
 		return fmt.Errorf("failed to send final response: %w", err)
 	}
 
+	// Bind the authenticated user to the connection and set its default DB.
+	conn.SetUser(user)
+	conn.SetDefaultDB("test")
 	conn.SetVersion(Version1_0)
 	return nil
 }
 
-// handshakeV0_3orV0_4 handles V0_3 and V0_4 handshake with plaintext auth key
+// authError sends a SCRAM/auth failure response and returns an error so the
+// connection is closed by the caller.
+func (s *Server) authError(conn *Connection, msg string) error {
+	_ = conn.WriteDatum(map[string]interface{}{
+		"success":    false,
+		"error":      msg,
+		"error_code": 20, // ERROR_AUTH_FAILURE in the RethinkDB protocol
+	})
+	return fmt.Errorf("authentication failed: %s", msg)
+}
+
+// handshakeV0_3orV0_4 handles V0_3 and V0_4 handshake with plaintext auth key.
+// These legacy versions authenticate with a shared auth key that cannot be
+// tied to a per-client identity, so we reject them: clients must use the V1.0
+// SCRAM-SHA-256 handshake to get per-connection identity and isolation.
 func (s *Server) handshakeV0_3orV0_4(conn *Connection, version uint32) error {
-	// Read auth key size (4 bytes, little-endian)
-	var authKeySize uint32
-	if err := binary.Read(conn, binary.LittleEndian, &authKeySize); err != nil {
-		return fmt.Errorf("failed to read auth key size: %w", err)
+	return fmt.Errorf("protocol version 0x%x is not supported: use the V1.0 SCRAM-SHA-256 handshake", version)
+}
+
+// sessionContext binds the connection's authenticated identity to a context so
+// the ReQL evaluator can enforce per-database access and resolve unqualified
+// db/table references against the connection's default DB (instead of a global).
+// If the connection is unauthenticated (e.g. tests) no authorizer is attached
+// and access is unrestricted.
+func (s *Server) sessionContext(ctx context.Context, conn *Connection) context.Context {
+	user := conn.User()
+	if user == nil || s.store == nil {
+		return reql.WithSession(ctx, conn.DefaultDB(), nil)
 	}
-
-	if authKeySize > 2048 {
-		return fmt.Errorf("auth key too large: %d bytes", authKeySize)
-	}
-
-	// Read auth key
-	authKey := make([]byte, authKeySize)
-	if _, err := io.ReadFull(conn, authKey); err != nil {
-		return fmt.Errorf("failed to read auth key: %w", err)
-	}
-
-	// For now, accept all auth keys (empty or not)
-	_ = authKey
-
-	// Read wire protocol (4 bytes, little-endian)
-	var wireProtocol uint32
-	if err := binary.Read(conn, binary.LittleEndian, &wireProtocol); err != nil {
-		return fmt.Errorf("failed to read wire protocol: %w", err)
-	}
-
-	// Validate wire protocol
-	if wireProtocol != ProtocolJSON {
-		return fmt.Errorf("unsupported wire protocol: 0x%x (only JSON is supported)", wireProtocol)
-	}
-
-	// Send success response
-	if _, err := conn.Write([]byte("SUCCESS\000")); err != nil {
-		return fmt.Errorf("failed to send success: %w", err)
-	}
-
-	conn.SetVersion(version)
-	return nil
+	userID := user.ID
+	store := s.store
+	authz := reql.Authorizer(func(db string, read, write, create, drop bool) error {
+		if store.HasDatabaseAccess(userID, db, read, write, create, drop) {
+			return nil
+		}
+		return fmt.Errorf("access denied: user %q has no permission on database %q", user.Username, db)
+	})
+	return reql.WithSession(ctx, conn.DefaultDB(), authz)
 }
 
 func (s *Server) queryLoop(conn *Connection) {
@@ -306,7 +337,8 @@ func (s *Server) queryLoop(conn *Connection) {
 		switch query.Type {
 		case QueryStart:
 			s.queryCount.Add(1)
-			ctx, cancel := context.WithCancel(context.Background())
+			baseCtx, cancel := context.WithCancel(context.Background())
+			ctx := s.sessionContext(baseCtx, conn)
 
 			queriesMu.Lock()
 			queries[query.Token] = cancel

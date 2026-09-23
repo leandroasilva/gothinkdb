@@ -24,6 +24,14 @@ type User struct {
 	Role         Role      `json:"role"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+
+	// SCRAM-SHA-256 credentials for the ReQL driver handshake. The plaintext
+	// password is never stored; these derived values are persisted (see
+	// persistedUser) so the driver port can authenticate without bcrypt.
+	Salt      string `json:"-"`
+	Iterations int   `json:"-"`
+	StoredKey string `json:"-"`
+	ServerKey string `json:"-"`
 }
 
 // NewUser creates a new user with hashed password
@@ -41,14 +49,38 @@ func NewUser(username, password string, role Role) (*User, error) {
 	}
 
 	now := time.Now()
-	return &User{
+	u := &User{
 		ID:           uuid.New().String(),
 		Username:     username,
 		PasswordHash: string(hash),
 		Role:         role,
 		CreatedAt:    now,
 		UpdatedAt:    now,
-	}, nil
+	}
+	u.setSCRAM(password)
+	return u, nil
+}
+
+// setSCRAM derives and stores the SCRAM-SHA-256 credentials for a password.
+func (u *User) setSCRAM(password string) {
+	u.Salt = GenerateSalt()
+	u.Iterations = SCRAMIterations
+	u.StoredKey, u.ServerKey = ComputeSCRAM(password, u.Salt, u.Iterations)
+}
+
+// SetPassword updates the password (bcrypt hash) and re-derives SCRAM creds.
+func (u *User) SetPassword(password string) error {
+	if password == "" {
+		return fmt.Errorf("password is required")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+	u.PasswordHash = string(hash)
+	u.setSCRAM(password)
+	u.UpdatedAt = time.Now()
+	return nil
 }
 
 // CheckPassword verifies if the provided password matches the hash

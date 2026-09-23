@@ -43,6 +43,23 @@ type Config struct {
 
 	// AuthKey is the legacy authentication key (deprecated, use users)
 	AuthKey string `json:"auth_key,omitempty"`
+
+	// JWTSecret signs the HTTP admin API tokens. Required in production; set
+	// via GOTHINKDB_JWT_SECRET.
+	JWTSecret string `json:"jwt_secret,omitempty"`
+
+	// ClusterSecret authenticates cluster (RPC) traffic. Set via
+	// GOTHINKDB_CLUSTER_SECRET.
+	ClusterSecret string `json:"cluster_secret,omitempty"`
+
+	// AdminUser/AdminPassword bootstrap the initial admin account. Set via
+	// GOTHINKDB_ADMIN_USER / GOTHINKDB_ADMIN_PASSWORD.
+	AdminUser     string `json:"admin_user,omitempty"`
+	AdminPassword string `json:"admin_password,omitempty"`
+
+	// AllowDefaultAdmin permits the insecure admin/admin bootstrap (dev only),
+	// enabled via GOTHINKDB_ALLOW_DEFAULT_ADMIN=1.
+	AllowDefaultAdmin bool `json:"allow_default_admin,omitempty"`
 }
 
 // DefaultConfig returns a configuration with sensible defaults
@@ -92,7 +109,35 @@ func Load(configFile string) *Config {
 		slog.Info("loaded configuration from file", "file", configFile)
 	}
 
+	applyEnvOverrides(cfg)
+
 	return cfg
+}
+
+// applyEnvOverrides lets deployment (Docker/systemd) inject secrets and the
+// bootstrap admin without writing them to a config file.
+func applyEnvOverrides(cfg *Config) {
+	if v := os.Getenv("GOTHINKDB_DATA_DIR"); v != "" {
+		cfg.DataDir = v
+	}
+	if v := os.Getenv("GOTHINKDB_SERVER_NAME"); v != "" {
+		cfg.ServerName = v
+	}
+	if v := os.Getenv("GOTHINKDB_JWT_SECRET"); v != "" {
+		cfg.JWTSecret = v
+	}
+	if v := os.Getenv("GOTHINKDB_CLUSTER_SECRET"); v != "" {
+		cfg.ClusterSecret = v
+	}
+	if v := os.Getenv("GOTHINKDB_ADMIN_USER"); v != "" {
+		cfg.AdminUser = v
+	}
+	if v := os.Getenv("GOTHINKDB_ADMIN_PASSWORD"); v != "" {
+		cfg.AdminPassword = v
+	}
+	if v := os.Getenv("GOTHINKDB_ALLOW_DEFAULT_ADMIN"); v == "1" || v == "true" {
+		cfg.AllowDefaultAdmin = true
+	}
 }
 
 // Save saves the configuration to a file

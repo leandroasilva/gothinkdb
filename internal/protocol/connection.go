@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net"
 	"time"
+
+	"github.com/leandroasilva/gothinkdb/internal/auth"
 )
 
 // Connection wraps a net.Conn with protocol-specific functionality
@@ -12,6 +14,8 @@ type Connection struct {
 	net.Conn
 	reader  *bufio.Reader
 	version uint32
+	user      *auth.User
+	defaultDB string
 }
 
 // NewConnection creates a new Connection
@@ -21,6 +25,18 @@ func NewConnection(conn net.Conn) *Connection {
 		reader: bufio.NewReader(conn),
 	}
 }
+
+// SetUser associates the authenticated user with this connection.
+func (c *Connection) SetUser(u *auth.User) { c.user = u }
+
+// User returns the authenticated user (nil if unauthenticated).
+func (c *Connection) User() *auth.User { return c.user }
+
+// SetDefaultDB sets the connection's default database (per-connection scope).
+func (c *Connection) SetDefaultDB(db string) { c.defaultDB = db }
+
+// DefaultDB returns the connection's default database.
+func (c *Connection) DefaultDB() string { return c.defaultDB }
 
 // SetVersion sets the protocol version for this connection
 func (c *Connection) SetVersion(version uint32) {

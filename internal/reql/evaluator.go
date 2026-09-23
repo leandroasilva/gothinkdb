@@ -259,9 +259,13 @@ func (e *Evaluator) evalTable(ctx context.Context, args []datum.Datum) (datum.Da
 		tableName = args[1].Str()
 	} else if len(args) >= 1 && args[0].Type() == datum.Str {
 		tableName = args[0].Str()
-		dbName = e.currentDB
+		dbName = e.resolveDB(ctx, "")
 	} else {
 		return datum.Datum{}, fmt.Errorf("TABLE requires table name")
+	}
+
+	if err := e.authorize(ctx, dbName, true, false, false, false); err != nil {
+		return datum.Datum{}, err
 	}
 
 	e.GetOrCreateTableDB(dbName, tableName)
@@ -287,6 +291,10 @@ func (e *Evaluator) evalInsert(ctx context.Context, args []datum.Datum) (datum.D
 	dbName, tableName, ok := e.getTableDBAndName(tableRef)
 	if !ok {
 		return datum.Datum{}, fmt.Errorf("invalid table reference")
+	}
+
+	if err := e.authorize(ctx, dbName, false, true, false, false); err != nil {
+		return datum.Datum{}, err
 	}
 
 	table := e.GetOrCreateTableDB(dbName, tableName)
@@ -406,6 +414,9 @@ func (e *Evaluator) evalUpdate(ctx context.Context, args []datum.Datum) (datum.D
 
 	// Handle table reference (update all documents)
 	if dbName, tableName, ok := e.getTableDBAndName(selection); ok {
+		if err := e.authorize(ctx, dbName, false, true, false, false); err != nil {
+			return datum.Datum{}, err
+		}
 		table := e.GetOrCreateTableDB(dbName, tableName)
 		count := 0
 		for id, doc := range table.Data {
@@ -481,6 +492,9 @@ func (e *Evaluator) evalDelete(ctx context.Context, args []datum.Datum) (datum.D
 
 	// Handle table reference (delete all documents)
 	if dbName, tableName, ok := e.getTableDBAndName(selection); ok {
+		if err := e.authorize(ctx, dbName, false, true, false, false); err != nil {
+			return datum.Datum{}, err
+		}
 		table := e.GetOrCreateTableDB(dbName, tableName)
 		count := len(table.Data)
 		table.Data = make(map[string]datum.Datum)
@@ -533,6 +547,9 @@ func (e *Evaluator) evalReplace(ctx context.Context, args []datum.Datum) (datum.
 
 	// Handle table reference (replace all documents)
 	if dbName, tableName, ok := e.getTableDBAndName(selection); ok {
+		if err := e.authorize(ctx, dbName, false, true, false, false); err != nil {
+			return datum.Datum{}, err
+		}
 		table := e.GetOrCreateTableDB(dbName, tableName)
 		count := 0
 		for id := range table.Data {
@@ -814,6 +831,10 @@ func (e *Evaluator) evalIndexCreate(ctx context.Context, args []datum.Datum) (da
 		return datum.Datum{}, fmt.Errorf("invalid table reference")
 	}
 
+	if err := e.authorize(ctx, dbName, false, true, false, false); err != nil {
+		return datum.Datum{}, err
+	}
+
 	indexName := args[1]
 	if indexName.Type() != datum.Str {
 		return datum.Datum{}, fmt.Errorf("index name must be a string")
@@ -853,6 +874,10 @@ func (e *Evaluator) evalIndexDrop(ctx context.Context, args []datum.Datum) (datu
 	dbName, tableName, ok := e.getTableDBAndName(tableRef)
 	if !ok {
 		return datum.Datum{}, fmt.Errorf("invalid table reference")
+	}
+
+	if err := e.authorize(ctx, dbName, false, true, false, false); err != nil {
+		return datum.Datum{}, err
 	}
 
 	indexName := args[1]
@@ -1005,6 +1030,10 @@ func (e *Evaluator) evalDBCreate(ctx context.Context, args []datum.Datum) (datum
 		return datum.Datum{}, fmt.Errorf("database name must be a string")
 	}
 
+	if err := e.authorize(ctx, dbName.Str(), false, false, true, false); err != nil {
+		return datum.Datum{}, err
+	}
+
 	if err := e.admin.CreateDatabase(dbName.Str()); err != nil {
 		return datum.Datum{}, err
 	}
@@ -1023,6 +1052,10 @@ func (e *Evaluator) evalDBDrop(ctx context.Context, args []datum.Datum) (datum.D
 	dbName := args[0]
 	if dbName.Type() != datum.Str {
 		return datum.Datum{}, fmt.Errorf("database name must be a string")
+	}
+
+	if err := e.authorize(ctx, dbName.Str(), false, false, false, true); err != nil {
+		return datum.Datum{}, err
 	}
 
 	if err := e.admin.DropDatabase(dbName.Str()); err != nil {
@@ -1079,11 +1112,15 @@ func (e *Evaluator) evalTableCreate(ctx context.Context, args []datum.Datum) (da
 	}
 
 	// Default to current database if not specified
-	dbName := e.currentDB
+	dbName := e.resolveDB(ctx, "")
 	if len(args) > 1 {
 		if name, ok := e.extractDBRef(args[1]); ok {
 			dbName = name
 		}
+	}
+
+	if err := e.authorize(ctx, dbName, false, false, true, false); err != nil {
+		return datum.Datum{}, err
 	}
 
 	if err := e.admin.CreateTable(dbName, tableName.Str()); err != nil {
@@ -1110,11 +1147,15 @@ func (e *Evaluator) evalTableDrop(ctx context.Context, args []datum.Datum) (datu
 	}
 
 	// Default to current database if not specified
-	dbName := e.currentDB
+	dbName := e.resolveDB(ctx, "")
 	if len(args) > 1 {
 		if name, ok := e.extractDBRef(args[1]); ok {
 			dbName = name
 		}
+	}
+
+	if err := e.authorize(ctx, dbName, false, false, false, true); err != nil {
+		return datum.Datum{}, err
 	}
 
 	if err := e.admin.DropTable(dbName, tableName.Str()); err != nil {
@@ -1129,11 +1170,15 @@ func (e *Evaluator) evalTableDrop(ctx context.Context, args []datum.Datum) (datu
 // evalTableList lists all tables in a database
 func (e *Evaluator) evalTableList(ctx context.Context, args []datum.Datum) (datum.Datum, error) {
 	// Default to current database if not specified
-	dbName := e.currentDB
+	dbName := e.resolveDB(ctx, "")
 	if len(args) > 0 {
 		if name, ok := e.extractDBRef(args[0]); ok {
 			dbName = name
 		}
+	}
+
+	if err := e.authorize(ctx, dbName, true, false, false, false); err != nil {
+		return datum.Datum{}, err
 	}
 
 	tables, err := e.admin.ListTables(dbName)

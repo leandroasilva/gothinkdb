@@ -334,6 +334,34 @@ func (s *Server) handleDatabase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Sub-resource: GET /api/databases/{name}/size returns the approximate
+	// database size in MB (used by the panel for quota enforcement).
+	if strings.HasSuffix(name, "/size") {
+		dbName := strings.TrimSuffix(name, "/size")
+		if dbName == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "database name required"})
+			return
+		}
+		user, _ := auth.UserFromContext(r.Context())
+		if user != nil && !user.IsAdmin() && !s.auth.GetStore().HasDatabaseAccess(user.ID, dbName, true, false, false, false) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permissions for database: " + dbName})
+			return
+		}
+		sizeBytes, err := s.evaluator.GetAdmin().DatabaseSizeBytes(dbName)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		const mb = int64(1024 * 1024)
+		sizeMb := (sizeBytes + mb - 1) / mb // round up to whole MB
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"dbName":    dbName,
+			"sizeBytes": sizeBytes,
+			"sizeMb":    sizeMb,
+		})
+		return
+	}
+
 	// Check database permission for non-admin users
 	user, _ := auth.UserFromContext(r.Context())
 	if user != nil && !user.IsAdmin() {
@@ -550,6 +578,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Query interface{} `json:"query"`
+		DB    string      `json:"db"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -559,8 +588,27 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	// Record query for metrics
 	s.RecordQuery()
 
-	// Set default database to widgettrace for Data Explorer
-	s.evaluator.SetCurrentDB("widgettrace")
+	// Resolve the default database for this request and enforce per-database
+	// permissions using the authenticated user (from the JWT context). The
+	// evaluator no longer keeps a global current DB, so concurrent requests are
+	// isolated from each other. Admins bypass authorization.
+	defaultDB := req.DB
+	if defaultDB == "" {
+		defaultDB = "widgettrace" // Data Explorer default
+	}
+	ctx := r.Context()
+	if user, _ := auth.UserFromContext(ctx); user != nil && !user.IsAdmin() {
+		store := s.auth.GetStore()
+		uid := user.ID
+		ctx = reql.WithSession(ctx, defaultDB, func(db string, read, write, create, drop bool) error {
+			if store.HasDatabaseAccess(uid, db, read, write, create, drop) {
+				return nil
+			}
+			return fmt.Errorf("access denied: no permission on database %q", db)
+		})
+	} else {
+		ctx = reql.WithSession(ctx, defaultDB, nil)
+	}
 
 	// If query is a string, parse it as a ReQL expression
 	queryArg := req.Query
@@ -579,7 +627,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Execute query using the ReQL evaluator
-	result, err := s.evaluator.Evaluate(r.Context(), queryArg)
+	result, err := s.evaluator.Evaluate(ctx, queryArg)
 	if err != nil {
 		slog.Error("query execution failed", "error", err)
 		writeJSON(w, http.StatusOK, map[string]interface{}{

@@ -73,10 +73,34 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request) {
 
 	// Extract user ID from path: /api/users/{id}
 	path := strings.TrimPrefix(r.URL.Path, "/api/users/")
-	userID := strings.Split(path, "/")[0]
+	segments := strings.Split(path, "/")
+	userID := segments[0]
 
 	if userID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "user ID required"})
+		return
+	}
+
+	// Sub-resource: PUT /api/users/{id}/password resets a user's password
+	// (bcrypt hash + SCRAM credentials), used by the provisioning agent for the
+	// idempotent create flow and by the panel's "reset password" action.
+	if len(segments) >= 2 && segments[1] == "password" {
+		if r.Method != http.MethodPut && r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		var req struct {
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Password == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password is required"})
+			return
+		}
+		if err := s.auth.GetStore().UpdateUserPassword(userID, req.Password); err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "password updated"})
 		return
 	}
 

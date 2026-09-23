@@ -81,20 +81,56 @@ func main() {
 	evaluator := reql.NewEvaluator()
 	cluster := rpc.NewClusterManager(cfg.ServerName)
 
-	// Create auth service
-	authStore := auth.NewStore()
+	// Create auth service backed by a persistent store so users and
+	// per-database permissions survive restarts (written to <DataDir>/auth.json).
+	authStore, err := auth.NewPersistentStore(cfg.DataDir)
+	if err != nil {
+		slog.Error("failed to initialize persistent auth store", "error", err)
+		os.Exit(1)
+	}
 	authService := auth.NewService(authStore)
+
+	// Configure the JWT signing secret. It must be provided via
+	// GOTHINKDB_JWT_SECRET in production; only the insecure dev bootstrap
+	// (GOTHINKDB_ALLOW_DEFAULT_ADMIN=1) may fall back to the built-in default.
+	if cfg.JWTSecret != "" {
+		auth.SetJWTSecret(cfg.JWTSecret)
+	} else if !cfg.AllowDefaultAdmin {
+		slog.Error("GOTHINKDB_JWT_SECRET is required in production (set GOTHINKDB_ALLOW_DEFAULT_ADMIN=1 only for local development)")
+		os.Exit(1)
+	}
+
+	// Cluster secret authenticates inter-node RPC traffic.
+	clusterSecret := cfg.ClusterSecret
+	if clusterSecret == "" {
+		if !cfg.AllowDefaultAdmin {
+			slog.Error("GOTHINKDB_CLUSTER_SECRET is required in production (set GOTHINKDB_ALLOW_DEFAULT_ADMIN=1 only for local development)")
+			os.Exit(1)
+		}
+		clusterSecret = "gothinkdb-cluster-secret"
+	}
 
 	// Create cluster manager wrapper (for node management)
 	clusterID := cluster.GetClusterID()
-	clusterManager := api.NewClusterManagerWrapper(clusterID, []byte("gothinkdb-cluster-secret"))
+	clusterManager := api.NewClusterManagerWrapper(clusterID, []byte(clusterSecret))
 
-	// Create default admin user
-	if admin, err := authStore.CreateDefaultAdmin(); err != nil {
-		slog.Error("failed to create default admin", "error", err)
+	// Bootstrap the admin account from the environment. The credentials are
+	// only created on first boot; an existing admin is never overwritten.
+	adminUser := cfg.AdminUser
+	adminPassword := cfg.AdminPassword
+	if adminUser == "" || adminPassword == "" {
+		if !cfg.AllowDefaultAdmin {
+			slog.Error("GOTHINKDB_ADMIN_USER and GOTHINKDB_ADMIN_PASSWORD are required in production (set GOTHINKDB_ALLOW_DEFAULT_ADMIN=1 to bootstrap admin/admin for local development)")
+			os.Exit(1)
+		}
+		adminUser = "admin"
+		adminPassword = "admin"
+	}
+	if admin, err := authStore.EnsureAdmin(adminUser, adminPassword); err != nil {
+		slog.Error("failed to bootstrap admin user", "error", err)
 		os.Exit(1)
 	} else if admin != nil {
-		slog.Info("default admin user created", "username", "admin", "password", "admin")
+		slog.Info("admin user bootstrapped", "username", adminUser)
 	}
 
 	// Create API server with all routes (protocol server will be set after creation)
@@ -159,8 +195,10 @@ func main() {
 	}()
 
 	// Start protocol server (ReQL) - share the same evaluator as the API server
+	// and the auth store so driver connections are authenticated (SCRAM-SHA-256)
+	// and authorized per database.
 	handler := protocol.NewReQLHandler(evaluator)
-	protocolServer := protocol.NewServer(cfg.DriverAddress, handler)
+	protocolServer := protocol.NewServer(cfg.DriverAddress, handler, authStore)
 	if err := protocolServer.Start(); err != nil {
 		slog.Error("failed to start protocol server", "error", err)
 		os.Exit(1)
